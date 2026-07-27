@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/ui/empty-state.jsx";
 import { useAuth } from "@/hooks/use-auth.js";
 import { useApp } from "@/store/app-store.jsx";
 import { timeAgo } from "@/lib/utils.js";
+import PageContainer from "@/components/layout/page-container.jsx";
 
 export default function Reviews() {
   const { user } = useAuth();
@@ -20,7 +21,7 @@ export default function Reviews() {
   const avg = total ? reviews.reduce((s, r) => s + r.rating, 0) / total : 0;
 
   return (
-    <div className="mx-auto max-w-3xl p-4 md:p-6">
+    <PageContainer>
       <PageHeader title="My reviews" description="Feedback seekers left after sessions with you." />
 
       {total === 0 ? (
@@ -72,6 +73,6 @@ export default function Reviews() {
           </div>
         </>
       )}
-    </div>
+    </PageContainer>
   );
 }

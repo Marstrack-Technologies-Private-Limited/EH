@@ -15,7 +15,9 @@ const SelectTrigger = React.forwardRef(function SelectTrigger(
     <SelectPrimitive.Trigger
       ref={ref}
       className={cn(
-        "flex h-10 w-full items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-xs",
+        // A trigger is a button, not a text field — iOS never zooms on it, so it
+        // stays at the small size on every breakpoint.
+        "flex h-9 w-full items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-[13px] shadow-xs",
         "placeholder:text-muted-foreground focus:outline-none focus:ring-[3px] focus:ring-ring/40 focus:border-ring",
         "disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 data-[placeholder]:text-muted-foreground",
         className,
@@ -76,7 +78,7 @@ const SelectItem = React.forwardRef(function SelectItem(
     <SelectPrimitive.Item
       ref={ref}
       className={cn(
-        "relative flex w-full cursor-pointer select-none items-center rounded-md py-1.5 pl-8 pr-2 text-sm outline-none",
+        "relative flex w-full cursor-pointer select-none items-center rounded-md py-1.5 pl-8 pr-2 text-[13px] outline-none",
         "focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className,
       )}

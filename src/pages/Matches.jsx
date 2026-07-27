@@ -12,6 +12,7 @@ import { useAuth } from "@/hooks/use-auth.js";
 import { useApp } from "@/store/app-store.jsx";
 import { useMatches } from "@/hooks/use-matches.js";
 import { scoreLabel } from "@/lib/matching.js";
+import PageContainer from "@/components/layout/page-container.jsx";
 
 const BARS = [
   { key: "topics", label: "Topic overlap", max: 50 },
@@ -27,7 +28,7 @@ export default function Matches() {
   const matches = useMatches(user).filter((m) => m.score > 0);
 
   return (
-    <div className="mx-auto max-w-5xl p-4 md:p-6">
+    <PageContainer>
       <PageHeader
         title="Your top matches"
         description="Ranked by topic overlap, proficiency, reputation and location."
@@ -132,6 +133,6 @@ export default function Matches() {
           })}
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }

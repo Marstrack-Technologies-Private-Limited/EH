@@ -1,6 +1,6 @@
-# Belop — Peer-to-Peer Help Platform (MVP frontend)
+# EH — Peer-to-Peer Help Platform (MVP frontend)
 
-Belop connects **Seekers** (people who need help solving a problem) with **Offerers**
+EH connects **Seekers** (people who need help solving a problem) with **Offerers**
 (people who offer their expertise). It matches them by topic, proficiency and
 location, lets them chat one-on-one in real time, and supports ratings & feedback.
 An admin panel manages the category/topic taxonomy.
@@ -28,9 +28,9 @@ npm run build    # production build → dist/
 
 | Role    | Email              | Password  |
 |---------|--------------------|-----------|
-| Seeker  | `seeker@belop.app` | `demo123` |
-| Offerer | `offerer@belop.app`| `demo123` |
-| Admin   | `admin@belop.app`  | `admin123`|
+| Seeker  | `seeker@eh.app` | `demo123` |
+| Offerer | `offerer@eh.app`| `demo123` |
+| Admin   | `admin@eh.app`  | `admin123`|
 
 Other accounts (`priya@`, `sofia@`, `mei@`, … all `demo123`) populate search & matching.
 

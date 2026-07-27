@@ -24,7 +24,8 @@ const TabsTrigger = React.forwardRef(function TabsTrigger({ className, ...props 
       className={cn(
         "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-all cursor-pointer",
         "focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
-        "data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm",
+        // Light purple wash for the selected tab rather than a solid/dark fill.
+        "data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-sm",
         className,
       )}
       {...props}

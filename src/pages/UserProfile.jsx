@@ -14,6 +14,7 @@ import { useApp } from "@/store/app-store.jsx";
 import { useAuth } from "@/hooks/use-auth.js";
 import { matchScore } from "@/lib/matching.js";
 import { timeAgo } from "@/lib/utils.js";
+import PageContainer from "@/components/layout/page-container.jsx";
 
 export default function UserProfile() {
   const { id } = useParams();
@@ -24,10 +25,10 @@ export default function UserProfile() {
   const person = state.users.find((u) => u.id === id);
   if (!person) {
     return (
-      <div className="mx-auto max-w-3xl p-6">
+      <PageContainer>
         <p className="text-muted-foreground">User not found.</p>
         <Button variant="outline" className="mt-4" onClick={() => navigate(-1)}>Go back</Button>
-      </div>
+      </PageContainer>
     );
   }
 
@@ -37,7 +38,7 @@ export default function UserProfile() {
   const canReview = me?.role === "seeker" && isOfferer && me.id !== person.id;
 
   return (
-    <div className="mx-auto max-w-4xl p-4 md:p-6">
+    <PageContainer>
       <Button variant="ghost" size="sm" onClick={() => navigate(-1)} className="mb-4">
         <ArrowLeft className="size-4" /> Back
       </Button>
@@ -170,6 +171,6 @@ export default function UserProfile() {
           </div>
         )}
       </div>
-    </div>
+    </PageContainer>
   );
 }

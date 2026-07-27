@@ -143,4 +143,35 @@
     background: var(--border);
     border-radius: 9999px;
   }
+
+  /* Loading shimmer — a light band sweeping across a muted block. Reads as
+     "content is coming" better than a plain opacity pulse. */
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+    background: var(--muted);
+  }
+  .shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--foreground) 8%, transparent),
+      transparent
+    );
+    animation: shimmer 1.4s infinite;
+  }
+  @keyframes shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer::after {
+      animation: none;
+    }
+  }
 }

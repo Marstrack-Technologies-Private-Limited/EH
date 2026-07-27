@@ -22,6 +22,7 @@ import { TopicPicker } from "@/components/topic-picker.jsx";
 import { useAuth } from "@/hooks/use-auth.js";
 import { useApp } from "@/store/app-store.jsx";
 import { timeAgo } from "@/lib/utils.js";
+import PageContainer from "@/components/layout/page-container.jsx";
 
 export default function Profile() {
   const { user, updateProfile } = useAuth();
@@ -50,7 +51,7 @@ export default function Profile() {
   const setD = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
 
   return (
-    <div className="mx-auto max-w-4xl p-4 md:p-6">
+    <PageContainer>
       <PageHeader
         title="My profile"
         actions={
@@ -180,6 +181,6 @@ export default function Profile() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageContainer>
   );
 }

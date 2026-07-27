@@ -9,6 +9,8 @@ import {
   Sparkles,
   Check,
   MapPin,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.jsx";
 import { Input } from "@/components/ui/input.jsx";
@@ -17,7 +19,8 @@ import { Textarea } from "@/components/ui/textarea.jsx";
 import { Card } from "@/components/ui/card.jsx";
 import { TopicPicker } from "@/components/topic-picker.jsx";
 import { useAuth } from "@/hooks/use-auth.js";
-import { useApp } from "@/store/app-store.jsx";
+import { useTaxonomy } from "@/hooks/use-p2p.js";
+import { LocationSelect } from "@/components/location-select.jsx";
 import { cn } from "@/lib/utils.js";
 
 const STEPS = ["Your details", "Specializations"];
@@ -39,15 +42,18 @@ const ROLES = [
 
 export default function Register() {
   const navigate = useNavigate();
-  const { register } = useAuth();
-  const { state } = useApp();
+  const { registerWithApi } = useAuth();
+  const taxonomy = useTaxonomy();
   const [step, setStep] = useState(0);
   const [errors, setErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({
     role: "seeker",
     name: "",
     email: "",
     password: "",
+    dob: "",
     country: "",
     city: "",
     problem: "",
@@ -63,6 +69,7 @@ export default function Register() {
     if (!form.name.trim()) e.name = "Name is required";
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email)) e.email = "Enter a valid email";
     if (form.password.length < 6) e.password = "At least 6 characters";
+    if (!form.dob) e.dob = "Required";
     if (!form.country.trim()) e.country = "Required";
     if (!form.city.trim()) e.city = "Required";
     setErrors(e);
@@ -73,19 +80,28 @@ export default function Register() {
     if (validateStep1()) setStep(1);
   };
 
-  const finish = () => {
+  /** Creates the account through MT_INSERT_USER_MASTER (SP 1701). */
+  const finish = async () => {
     if (form.topics.length === 0) {
       toast.error("Select at least one topic to continue.");
       return;
     }
-    const res = register(form);
-    if (!res.ok) {
-      setStep(0);
-      setErrors({ email: res.error });
-      return;
+    setBusy(true);
+    try {
+      const res = await registerWithApi(form);
+      if (!res.ok) {
+        setStep(0);
+        setErrors({ email: res.error });
+        toast.error(res.error);
+        return;
+      }
+      toast.success(
+        `Account created${res.savedId ? ` (#${res.savedId})` : ""} — welcome to EH!`,
+      );
+      navigate("/dashboard");
+    } finally {
+      setBusy(false);
     }
-    toast.success("Account created — welcome to Belop!");
-    navigate("/dashboard");
   };
 
   return (
@@ -97,7 +113,7 @@ export default function Register() {
             <div className="flex size-9 items-center justify-center rounded-xl bg-primary">
               <Handshake className="size-5 text-primary-foreground" />
             </div>
-            <span className="text-lg font-extrabold">Belop</span>
+            <span className="text-lg font-extrabold">EH</span>
           </Link>
           <Link to="/login" className="text-sm text-muted-foreground hover:text-foreground">
             Already have an account?
@@ -188,14 +204,45 @@ export default function Register() {
                   <Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="you@example.com" />
                 </Field>
                 <Field label="Password" error={errors.password}>
-                  <Input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} placeholder="••••••••" />
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? "text" : "password"}
+                      className="pr-10"
+                      value={form.password}
+                      onChange={(e) => set("password", e.target.value)}
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      className="absolute right-0 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  </div>
                 </Field>
-                <Field label="Country" error={errors.country}>
-                  <Input value={form.country} onChange={(e) => set("country", e.target.value)} placeholder="United Kingdom" />
+                <Field label="Date of birth" error={errors.dob}>
+                  <Input
+                    type="date"
+                    value={form.dob}
+                    onChange={(e) => set("dob", e.target.value)}
+                    max={new Date().toISOString().slice(0, 10)}
+                  />
                 </Field>
-                <Field label="City" error={errors.city}>
-                  <Input value={form.city} onChange={(e) => set("city", e.target.value)} placeholder="London" />
-                </Field>
+                <div className="sm:col-span-2">
+                  <LocationSelect
+                    country={form.country}
+                    city={form.city}
+                    onCountry={(v) => set("country", v)}
+                    onCity={(v) => set("city", v)}
+                  />
+                  {(errors.country || errors.city) && (
+                    <p className="mt-1 text-xs font-medium text-destructive">
+                      {errors.country || errors.city}
+                    </p>
+                  )}
+                </div>
               </div>
 
               <Field
@@ -231,12 +278,38 @@ export default function Register() {
                 </p>
               </div>
 
-              <TopicPicker
-                categories={state.categories}
-                value={form.topics}
-                onChange={(t) => set("topics", t)}
-                withRating={isOfferer}
-              />
+              {taxonomy.loading ? (
+                <div className="space-y-2" role="status" aria-label="Loading categories">
+                  {Array.from({ length: 4 }, (_, i) => (
+                    <div key={i} className="rounded-lg border p-3">
+                      <div className="shimmer h-3.5 w-1/3 rounded" />
+                      <div className="mt-2 flex gap-1.5">
+                        <div className="shimmer h-5 w-20 rounded-full" />
+                        <div className="shimmer h-5 w-24 rounded-full" />
+                        <div className="shimmer h-5 w-16 rounded-full" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : taxonomy.error ? (
+                <div className="space-y-2 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+                  <p className="text-sm break-words">{taxonomy.error}</p>
+                  <Button variant="outline" size="sm" onClick={taxonomy.reload}>
+                    Try again
+                  </Button>
+                </div>
+              ) : taxonomy.categories.length === 0 ? (
+                <p className="rounded-lg border p-4 text-sm text-muted-foreground">
+                  No categories have been set up yet — an admin needs to add them first.
+                </p>
+              ) : (
+                <TopicPicker
+                  categories={taxonomy.categories}
+                  value={form.topics}
+                  onChange={(t) => set("topics", t)}
+                  withRating={isOfferer}
+                />
+              )}
 
               <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
                 <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
@@ -249,8 +322,9 @@ export default function Register() {
                 <Button variant="outline" size="lg" onClick={() => setStep(0)}>
                   <ArrowLeft className="size-4" /> Back
                 </Button>
-                <Button size="lg" onClick={finish}>
-                  Create account <Check className="size-4" />
+                <Button size="lg" onClick={finish} disabled={busy}>
+                  {busy ? "Creating…" : "Create account"}
+                  {!busy && <Check className="size-4" />}
                 </Button>
               </div>
             </div>

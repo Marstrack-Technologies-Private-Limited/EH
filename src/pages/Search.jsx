@@ -22,6 +22,7 @@ import { useAuth } from "@/hooks/use-auth.js";
 import { useApp } from "@/store/app-store.jsx";
 import { useMatches, DEFAULT_FILTERS } from "@/hooks/use-matches.js";
 import { useDebounce } from "@/hooks/use-debounce.js";
+import PageContainer from "@/components/layout/page-container.jsx";
 
 export default function Search() {
   const { user } = useAuth();
@@ -52,7 +53,7 @@ export default function Search() {
     debounced;
 
   return (
-    <div className="mx-auto max-w-6xl p-4 md:p-6">
+    <PageContainer>
       <PageHeader
         title="Discover offerers"
         description="Find people who can help — ranked by how well they match you."
@@ -185,6 +186,6 @@ export default function Search() {
           )}
         </div>
       </div>
-    </div>
+    </PageContainer>
   );
 }

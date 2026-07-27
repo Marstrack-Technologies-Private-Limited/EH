@@ -4,7 +4,7 @@ import { CATEGORIES, buildTopicIndex } from "@/data/categories.js";
 import { REVIEWS } from "@/data/reviews.js";
 import { CONVERSATIONS } from "@/data/conversations.js";
 
-const STORAGE_KEY = "belop_state_v1";
+const STORAGE_KEY = "eh_state_v1";
 
 function seed() {
   return {
@@ -33,6 +33,20 @@ function reducer(state, action) {
   switch (action.type) {
     case "LOGIN":
       return { ...state, currentUserId: action.userId };
+    case "API_LOGIN": {
+      // Upsert the admin identity returned by the tech23 /cpanel/login call so
+      // the local-only screens (nav, profile, route guards) have a user object.
+      const exists = state.users.some((u) => u.id === action.user.id);
+      return {
+        ...state,
+        users: exists
+          ? state.users.map((u) =>
+              u.id === action.user.id ? { ...u, ...action.user } : u,
+            )
+          : [...state.users, action.user],
+        currentUserId: action.user.id,
+      };
+    }
     case "LOGOUT":
       return { ...state, currentUserId: null };
     case "REGISTER":

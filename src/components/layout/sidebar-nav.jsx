@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils.js";
 import { useAuth } from "@/hooks/use-auth.js";
 import { navForRole } from "./nav-config.js";
 import { UserAvatar } from "@/components/user-avatar.jsx";
-import { RoleBadge } from "@/components/role-badge.jsx";
 
 export default function SidebarNav() {
   const { user, logout } = useAuth();
@@ -25,7 +24,7 @@ export default function SidebarNav() {
           <Handshake className="size-5 text-sidebar-primary-foreground" />
         </div>
         <div>
-          <p className="font-extrabold leading-tight tracking-tight">Belop</p>
+          <p className="font-extrabold leading-tight tracking-tight">EH</p>
           <p className="text-[11px] text-sidebar-foreground/50 leading-tight">
             Peer-to-peer help
           </p>
@@ -45,7 +44,9 @@ export default function SidebarNav() {
               className={cn(
                 "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
                 isActive
-                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                  // Soft purple wash rather than a solid fill — reads as selected
+                  // without going dark and heavy.
+                  ? "bg-sidebar-primary/20 text-sidebar-primary"
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
               )}
             >
@@ -61,11 +62,12 @@ export default function SidebarNav() {
         <div className="border-t border-sidebar-border p-3">
           <div className="flex items-center gap-3 rounded-lg px-2 py-2">
             <UserAvatar user={user} className="size-9" showStatus />
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 leading-tight">
               <p className="truncate text-sm font-medium">{user.name}</p>
-              <div className="mt-0.5">
-                <RoleBadge role={user.role} />
-              </div>
+              {/* Role as a quiet caption line, not a badge — keeps the block aligned */}
+              <p className="truncate text-[11px] uppercase tracking-wide text-sidebar-foreground/50">
+                {user.role}
+              </p>
             </div>
           </div>
           <button

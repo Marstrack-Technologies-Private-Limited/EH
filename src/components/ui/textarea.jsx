@@ -7,7 +7,8 @@ const Textarea = React.forwardRef(function Textarea({ className, ...props }, ref
       ref={ref}
       data-slot="textarea"
       className={cn(
-        "flex min-h-20 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-xs transition-colors",
+        // Same rule as Input: 16px on phones to stop iOS zooming on focus, small above.
+        "flex min-h-16 w-full rounded-lg border border-input bg-background px-3 py-2 text-base sm:text-[13px] shadow-xs transition-colors",
         "placeholder:text-muted-foreground",
         "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 focus-visible:border-ring",
         "disabled:cursor-not-allowed disabled:opacity-50",

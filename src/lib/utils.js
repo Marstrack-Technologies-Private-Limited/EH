@@ -6,12 +6,16 @@ export function cn(...inputs) {
 }
 
 export function initials(name = "") {
-  return name
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase())
-    .join("");
+  const parts = String(name).split(" ").filter(Boolean);
+  // Two words → one letter each ("Aisha Khan" → AK).
+  if (parts.length > 1) {
+    return parts
+      .slice(0, 2)
+      .map((p) => p[0]?.toUpperCase())
+      .join("");
+  }
+  // Single word (or a bare username) → its first two characters ("siddique" → SI).
+  return (parts[0] || "").slice(0, 2).toUpperCase();
 }
 
 export function timeAgo(ts) {

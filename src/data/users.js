@@ -10,7 +10,7 @@ export const USERS = [
   {
     id: "u_aisha",
     name: "Aisha Khan",
-    email: "seeker@belop.app",
+    email: "seeker@eh.app",
     password: "demo123",
     role: "seeker",
     avatar: "https://i.pravatar.cc/150?img=47",
@@ -33,7 +33,7 @@ export const USERS = [
   {
     id: "u_carlos",
     name: "Carlos Mendes",
-    email: "offerer@belop.app",
+    email: "offerer@eh.app",
     password: "demo123",
     role: "offerer",
     avatar: "https://i.pravatar.cc/150?img=12",
@@ -57,8 +57,8 @@ export const USERS = [
   },
   {
     id: "u_admin",
-    name: "Belop Admin",
-    email: "admin@belop.app",
+    name: "EH Admin",
+    email: "admin@eh.app",
     password: "admin123",
     role: "admin",
     avatar: null,
@@ -78,7 +78,7 @@ export const USERS = [
   {
     id: "u_priya",
     name: "Priya Sharma",
-    email: "priya@belop.app",
+    email: "priya@eh.app",
     password: "demo123",
     role: "offerer",
     avatar: "https://i.pravatar.cc/150?img=45",
@@ -102,7 +102,7 @@ export const USERS = [
   {
     id: "u_sofia",
     name: "Sofia Rossi",
-    email: "sofia@belop.app",
+    email: "sofia@eh.app",
     password: "demo123",
     role: "offerer",
     avatar: "https://i.pravatar.cc/150?img=32",
@@ -126,7 +126,7 @@ export const USERS = [
   {
     id: "u_david",
     name: "David Okafor",
-    email: "david@belop.app",
+    email: "david@eh.app",
     password: "demo123",
     role: "offerer",
     avatar: "https://i.pravatar.cc/150?img=14",
@@ -150,7 +150,7 @@ export const USERS = [
   {
     id: "u_mei",
     name: "Mei Lin",
-    email: "mei@belop.app",
+    email: "mei@eh.app",
     password: "demo123",
     role: "offerer",
     avatar: "https://i.pravatar.cc/150?img=44",
@@ -174,7 +174,7 @@ export const USERS = [
   {
     id: "u_lucas",
     name: "Lucas Fernandes",
-    email: "lucas@belop.app",
+    email: "lucas@eh.app",
     password: "demo123",
     role: "offerer",
     avatar: "https://i.pravatar.cc/150?img=51",
@@ -197,7 +197,7 @@ export const USERS = [
   {
     id: "u_hana",
     name: "Hana Suzuki",
-    email: "hana@belop.app",
+    email: "hana@eh.app",
     password: "demo123",
     role: "offerer",
     avatar: "https://i.pravatar.cc/150?img=29",
@@ -220,7 +220,7 @@ export const USERS = [
   {
     id: "u_omar",
     name: "Omar Haddad",
-    email: "omar@belop.app",
+    email: "omar@eh.app",
     password: "demo123",
     role: "offerer",
     avatar: "https://i.pravatar.cc/150?img=59",
@@ -245,7 +245,7 @@ export const USERS = [
   {
     id: "u_tom",
     name: "Tom Becker",
-    email: "tom@belop.app",
+    email: "tom@eh.app",
     password: "demo123",
     role: "seeker",
     avatar: "https://i.pravatar.cc/150?img=68",
@@ -267,7 +267,7 @@ export const USERS = [
   {
     id: "u_nadia",
     name: "Nadia Petrova",
-    email: "nadia@belop.app",
+    email: "nadia@eh.app",
     password: "demo123",
     role: "seeker",
     avatar: "https://i.pravatar.cc/150?img=24",
@@ -287,26 +287,5 @@ export const USERS = [
   },
 ];
 
-export const DEMO_LOGINS = [
-  {
-    role: "seeker",
-    email: "seeker@belop.app",
-    password: "demo123",
-    name: "Aisha Khan",
-    blurb: "Browse as a Seeker — search & match with offerers",
-  },
-  {
-    role: "offerer",
-    email: "offerer@belop.app",
-    password: "demo123",
-    name: "Carlos Mendes",
-    blurb: "Browse as an Offerer — receive requests & manage skills",
-  },
-  {
-    role: "admin",
-    email: "admin@belop.app",
-    password: "admin123",
-    name: "Belop Admin",
-    blurb: "Open the Admin panel — manage categories & topics",
-  },
-];
+// Demo logins were removed — sign-in now goes through the backend in one of
+// three modes (Seeker / Offerer / Admin). See src/api/auth.js.
