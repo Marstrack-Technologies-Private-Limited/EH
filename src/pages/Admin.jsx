@@ -1049,6 +1049,7 @@ function ServicesTab({ createdBy, view, onView }) {
     search,
   });
   const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const activeCategory = categories.find((c) => c.id === categoryId);
