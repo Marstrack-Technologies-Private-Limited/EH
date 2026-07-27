@@ -39,7 +39,8 @@ const MODES = [
     label: "Admin",
     icon: Shield,
     blurb: "Manage categories, topics & services.",
-    landing: "/admin",
+    // Every mode lands on the dashboard; admins reach the panel from the nav.
+    landing: "/dashboard",
   },
 ];
 
