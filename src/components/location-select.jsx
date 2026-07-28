@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Country, City } from "country-state-city";
 import { Check, ChevronDown, Search as SearchIcon } from "lucide-react";
 import { Input } from "@/components/ui/input.jsx";
 import { Label } from "@/components/ui/label.jsx";
@@ -109,8 +108,22 @@ function Combo({ label, value, onChange, options, placeholder, disabled, emptyTe
   );
 }
 
-const COUNTRIES = Country.getAllCountries();
-const COUNTRY_NAMES = COUNTRIES.map((c) => c.name);
+/**
+ * `country-state-city` inlines every city on earth — ~16 MB unpacked, which
+ * added ~8 MB to the main bundle when imported statically. Loading it on demand
+ * puts it in its own chunk so the app shell stays small; the dataset only
+ * arrives when a form with a location picker is actually opened.
+ */
+let dataPromise = null;
+function loadLocationData() {
+  if (!dataPromise) {
+    dataPromise = import("country-state-city").then((m) => ({
+      countries: m.Country.getAllCountries(),
+      City: m.City,
+    }));
+  }
+  return dataPromise;
+}
 
 /**
  * Country and city, where the city list follows the chosen country.
@@ -118,13 +131,31 @@ const COUNTRY_NAMES = COUNTRIES.map((c) => c.name);
  * Values are the plain names the API stores, not ISO codes.
  */
 export function LocationSelect({ country, city, onCountry, onCity, className }) {
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadLocationData().then((d) => {
+      if (!cancelled) setData(d);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const countryNames = useMemo(
+    () => (data ? data.countries.map((c) => c.name) : []),
+    [data],
+  );
+
   const cities = useMemo(() => {
-    const match = COUNTRIES.find((c) => c.name === country);
+    if (!data) return [];
+    const match = data.countries.find((c) => c.name === country);
     if (!match) return [];
-    const list = City.getCitiesOfCountry(match.isoCode) || [];
+    const list = data.City.getCitiesOfCountry(match.isoCode) || [];
     // De-duplicate: the dataset repeats city names across states.
     return [...new Set(list.map((c) => c.name))].sort((a, b) => a.localeCompare(b));
-  }, [country]);
+  }, [data, country]);
 
   return (
     <div className={cn("grid gap-2 sm:grid-cols-2", className)}>
@@ -136,15 +167,16 @@ export function LocationSelect({ country, city, onCountry, onCity, className }) 
           // The old city almost certainly isn't in the new country.
           if (next !== country) onCity("");
         }}
-        options={COUNTRY_NAMES}
-        placeholder="Select a country…"
+        options={countryNames}
+        disabled={!data}
+        placeholder={data ? "Select a country…" : "Loading countries…"}
       />
       <Combo
         label="City"
         value={city}
         onChange={onCity}
         options={cities}
-        disabled={!country}
+        disabled={!data || !country}
         placeholder={country ? "Select a city…" : "Pick a country first"}
         emptyText={
           country ? "No cities listed for this country." : "Pick a country first."
