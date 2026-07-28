@@ -159,6 +159,10 @@ curl -s -X POST "https://devapi.tech23.net/global/globalSpHandler?spname=1692" \
 | MT_INSERT_P2P_SERVICE | 1698 | sp | ✅ 201 |
 | MTVWUSERMASTER | 1699 | view | ✅ 200 — seekers + offerers |
 | MT_INSERT_USER_MASTER | 1701 | sp | ✅ 201 — **only with `NEWEXISTING:"NEW"`**, see trap below |
+| MT_INSERT_DELETE_USER_CATEGORIES | 1702 | sp | ✅ 201 — CREATE + DELETE both verified |
+| MTVWP2PUSERAREASOFINTERESTS | 1703 | view | ✅ 200 — filter by `USERID` |
+| MTVWP2PUSERTOPICSOFINTERESTS | 1704 | view | ✅ 200 — filter by `USERID` |
+| MT_INSERT_DELETE_USER_TOPICS | 1705 | sp | ✅ 201 — CREATE + DELETE both verified |
 
 Each "new id" view returns one row with a *differently named* single column
 (`NEWCAT`, `NEWTOPIC`, `NEWSERVICEID`) — read it **positionally**
@@ -194,9 +198,62 @@ Each "new id" view returns one row with a *differently named* single column
 // 1698 — service
 {"SERVICEID":0,"CATEGORYID":1,"SERVICENAME":"","SERVICEDESCRIPTION":"","SERVICECREATEDBY":"","SERVICEACTIVE":1,"NEWEXISTING":"NEW","SUCCESS_STATUS":"","ERROR_STATUS":""}
 
-// 1701 — user
-{"USERREGNO":0,"USERNAME":"","USEREMAIL":"","USERPASSWORD":"","USERSEEKERGUIDANCEALL":"SEEKER","USERCOUNTRY":"","USERCITY":"","USERPERSONALINFORMATION":"","USERDOB":"1995-04-12","USERACTIVE":1,"NEWEXISTING":"NEW","SUCCESS_STATUS":"","ERROR_STATUS":""}
+// 1701 — user. USERREGISTRATIONDATE was added 2026-07-28; the old 12-param set now 501s.
+{"USERREGNO":0,"USERNAME":"","USEREMAIL":"","USERPASSWORD":"","USERSEEKERGUIDANCEALL":"SEEKER","USERCOUNTRY":"","USERCITY":"","USERPERSONALINFORMATION":"","USERREGISTRATIONDATE":"2026-07-28","USERDOB":"1995-04-12","USERACTIVE":1,"NEWEXISTING":"NEW","SUCCESS_STATUS":"","ERROR_STATUS":""}
 ```
+
+### User interests — SPs 1702 / 1705, views 1703 / 1704
+
+One endpoint does both directions via `@CREATEDELETE`:
+
+```jsonc
+// 1702 — a user's area of interest (category)
+{"USERID":13,"CATEGORYID":1,"CREATEDELETE":"CREATE","SUCCESS_STATUS":"","ERROR_STATUS":""}
+// 1705 — a user's topic of interest
+{"USERID":13,"TOPICID":1,"CREATEDELETE":"CREATE","SUCCESS_STATUS":"","ERROR_STATUS":""}
+```
+
+- Both answer `{"message":"Document Saved"}` — **not** a row id, unlike the other SPs.
+- `"DELETE"` in the same field removes the pair.
+- ⚠️ **CREATE does not de-duplicate.** Sending the same (user, category) pair twice
+  inserts two rows. Filter already-chosen items out of the picker. One DELETE
+  does clear all duplicates of a pair.
+- Columns — 1703: `USERID`, `USERNAME`, `OM_USER_SEEKER_GUIDANCE_ALL`,
+  `AREAOFINTERESTID`, `OM_CATEGORY_NAME`. 1704: same plus `TOPICNAME`,
+  `CATEGORYNO`, `CATEGORYNAME`.
+- ⚠️ `AREAOFINTERESTID` means **category id on 1703** and **topic id on 1704** —
+  same column name, different entity.
+- Filter both by `USERID`.
+
+### Member (seeker / offerer) sign-in
+
+There is no member login endpoint. The app bootstraps a session with the module
+service account, then matches credentials server-side on view 1699:
+
+```
+&OM_USER_EMAIL=<email>&OM_USER_PASSWORD=<password>
+```
+
+The row only returns when the password matches (verified: right password → 1 row,
+wrong → 0). See `loginMemberRequest` in `src/api/auth.js`. Move this to a proper
+login SP when the backend provides one — the password currently travels in a
+query string.
+
+### SP 1701 round-trip status (re-verified 2026-07-28 after the backend fix)
+
+| Field | Stored? |
+|---|---|
+| name, email, password, type, country, city, personal info | ✅ |
+| `USERDOB` → `OM_USER_DOB` | ✅ fixed — column added to view 1699 |
+| `USERREGISTRATIONDATE` → `OM_USER_REGISTRATION_DATE` | ✅ fixed |
+| `USERACTIVE` → `OM_USER_ACTIVE` | ❌ **still ignored** — `0` and `false` both store `true`, on insert and update |
+
+The ACTIVE bug is specific to this SP: `MT_INSERT_P2P_CATEGORIES` with
+`CATEGORYACTIVE:0` correctly stores `OM_CATEGORY_ACTIVE:false`.
+
+The SP returns only `{"message":"<id>"}` — the declared `SUCCESS_STATUS` /
+`ERROR_STATUS` outputs never come back, so confirm a write by re-reading the row
+(`getUserByRegNo` + `diffSavedUser` in `p2p.js`).
 
 > ⚠️ **Trap:** the spec declares `@NEWEXISTING BIT` on 1701, but the deployed SP
 > wants the **strings** like the other three. Sending `1` or `0` returns a

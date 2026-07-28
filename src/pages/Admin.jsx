@@ -39,7 +39,15 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs.jsx";
 import { useAuth } from "@/hooks/use-auth.js";
 import { useCategories, useServices, useTopics, useUsers } from "@/hooks/use-p2p.js";
-import { saveCategory, saveService, saveTopic, saveUser } from "@/api/p2p.js";
+import {
+  saveCategory,
+  saveService,
+  saveTopic,
+  saveUser,
+  getUserByRegNo,
+  diffSavedUser,
+  USER_FIELDS_NOT_STORED,
+} from "@/api/p2p.js";
 import { USER_TYPE } from "@/api/config.js";
 import PageContainer from "@/components/layout/page-container.jsx";
 import { LocationSelect } from "@/components/location-select.jsx";
@@ -1346,36 +1354,64 @@ function MembersTab({ view, onView }) {
       country: u.country,
       city: u.city,
       personalInformation: u.info,
-      dob: "",
+      // The view now returns both dates, so an edit prefills instead of forcing
+      // the admin to retype them.
+      dob: u.dob ? String(u.dob).slice(0, 10) : "",
+      registrationDate: u.registeredAt ? String(u.registeredAt).slice(0, 10) : "",
       active: u.active,
     });
   }, []);
 
   const submit = useCallback(async () => {
-    if (!editing.name.trim()) {
-      toast.error("Name is required.");
+    // Report EVERY missing field at once — SP 1701 needs all of them, and
+    // fixing them one toast at a time is needlessly slow.
+    const missing = [
+      [!editing.name.trim(), "Name"],
+      [!editing.email.trim(), "Email"],
+      [!editing.password, "Password"],
+      [!editing.country, "Country"],
+      [!editing.city, "City"],
+      [!editing.dob, "Date of birth"],
+    ]
+      .filter(([bad]) => bad)
+      .map(([, label]) => label);
+
+    if (missing.length) {
+      toast.error(`Missing ${missing.length} required field${missing.length > 1 ? "s" : ""}`, {
+        description: missing.join(", "),
+      });
       return;
     }
-    if (!editing.email.trim()) {
-      toast.error("Email is required.");
-      return;
-    }
-    if (!editing.password) {
-      toast.error("A password is required.");
-      return;
-    }
-    if (!editing.country || !editing.city) {
-      toast.error("Pick a country and city.");
-      return;
-    }
-    if (!editing.dob) {
-      toast.error("Date of birth is required — the members view doesn't return it.");
-      return;
-    }
+
     setBusy(true);
+    const payload = { ...editing, name: editing.name.trim() };
     try {
-      const res = await saveUser({ ...editing, name: editing.name.trim() });
-      toastSaved("Member", res, editing.regNo > 0);
+      const res = await saveUser(payload);
+      const regNo = res.id ?? payload.regNo;
+
+      // The SP answers with just the row id — its SUCCESS_STATUS / ERROR_STATUS
+      // output params never come back — so confirm the write by reading the row.
+      let note = USER_FIELDS_NOT_STORED.map((f) => f.field).join(", ");
+      try {
+        const saved = await getUserByRegNo(regNo);
+        const { noRow, notReadBack } = diffSavedUser(payload, saved);
+        if (noRow) {
+          toast.error("Saved, but the member could not be read back", {
+            description: `Reg no ${regNo} returned no row from the members view.`,
+          });
+          setEditing(null);
+          reload();
+          return;
+        }
+        if (notReadBack.length) note = `${notReadBack.join(", ")}, ${note}`;
+      } catch {
+        /* verification is best-effort; the save itself already succeeded */
+      }
+
+      toast.success(
+        `Member ${payload.regNo > 0 ? "updated" : "created"} (#${regNo})`,
+        { description: `Not stored by the backend: ${note}` },
+      );
       setEditing(null);
       reload();
     } catch (err) {
@@ -1449,6 +1485,7 @@ function MembersTab({ view, onView }) {
             city: "",
             personalInformation: "",
             dob: "",
+            registrationDate: new Date().toISOString().slice(0, 10),
             active: true,
           })
         }
@@ -1546,6 +1583,10 @@ function MembersTab({ view, onView }) {
             { label: "City", value: viewing.city },
             { label: "About", value: viewing.info },
             {
+              label: "Date of birth",
+              value: viewing.dob ? new Date(viewing.dob).toLocaleDateString() : "",
+            },
+            {
               label: "Registered",
               value: viewing.registeredAt
                 ? new Date(viewing.registeredAt).toLocaleString()
@@ -1632,12 +1673,6 @@ function MembersTab({ view, onView }) {
               max={new Date().toISOString().slice(0, 10)}
               onChange={(e) => setEditing((s) => ({ ...s, dob: e.target.value }))}
             />
-            {editing.regNo > 0 && (
-              <p className="text-[10px] text-muted-foreground">
-                The members view doesn't return the stored date of birth, so it has to
-                be re-entered on every edit — saving without it would blank the record.
-              </p>
-            )}
           </div>
           <div className="space-y-1">
             <Label htmlFor="mem-info">About</Label>
@@ -1651,10 +1686,16 @@ function MembersTab({ view, onView }) {
               }
             />
           </div>
-          <ActiveField
-            checked={editing.active}
-            onChange={(v) => setEditing((s) => ({ ...s, active: v }))}
-          />
+          <div className="space-y-1">
+            <ActiveField
+              checked={editing.active}
+              onChange={(v) => setEditing((s) => ({ ...s, active: v }))}
+            />
+            <p className="text-[10px] text-muted-foreground">
+              Sent, but MT_INSERT_USER_MASTER still ignores it — OM_USER_ACTIVE
+              always reads back true.
+            </p>
+          </div>
         </FormDialog>
       )}
     </div>

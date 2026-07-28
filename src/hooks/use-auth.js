@@ -7,7 +7,7 @@ import {
   logout as apiLogout,
   selectAuth,
 } from "@/store/auth-slice.js";
-import { saveUser } from "@/api/p2p.js";
+import { saveUser, addUserCategory, addUserTopic } from "@/api/p2p.js";
 import { LOGIN_MODE, USER_TYPE } from "@/api/config.js";
 
 let idCounter = 0;
@@ -16,11 +16,30 @@ function makeId(prefix) {
   return `${prefix}_${Date.now().toString(36)}${idCounter}`;
 }
 
-/** Map the app's seeker/offerer role onto OM_USER_SEEKERS_GUIDANCE_ALL. */
+/** Map the app's seeker/offerer role onto OM_USER_SEEKER_GUIDANCE_ALL. */
 function toUserType(role) {
   if (role === "offerer") return USER_TYPE.OFFERER;
   if (role === "admin") return USER_TYPE.ALL;
   return USER_TYPE.SEEKER;
+}
+
+/**
+ * Persist a member's chosen topics, plus the distinct categories those topics
+ * belong to, through SPs 1705 and 1702.
+ *
+ * The categories are de-duplicated first: those SPs do not de-duplicate, so
+ * sending the same (user, category) pair twice inserts two rows.
+ */
+async function saveInterests(userId, topics = []) {
+  const categoryIds = [
+    ...new Set(topics.map((t) => Number(t.categoryId)).filter(Boolean)),
+  ];
+  const topicIds = [...new Set(topics.map((t) => Number(t.topicId)).filter(Boolean))];
+
+  await Promise.all([
+    ...categoryIds.map((id) => addUserCategory(userId, id)),
+    ...topicIds.map((id) => addUserTopic(userId, id)),
+  ]);
 }
 
 /**
@@ -128,8 +147,21 @@ export function useAuth() {
       } catch (err) {
         return { ok: false, error: err.message || "Could not create the account." };
       }
+
+      // Interests are separate objects (SPs 1702 / 1705), saved once the member
+      // has a registration number. The account already exists at this point, so
+      // a failure here is reported but does not undo the sign-up.
+      let interestsError = null;
+      if (saved.id && data.topics?.length) {
+        try {
+          await saveInterests(saved.id, data.topics);
+        } catch (err) {
+          interestsError = err.message || "Your interests could not be saved.";
+        }
+      }
+
       const local = register({ ...data, regNo: saved.id });
-      return local.ok ? { ...local, savedId: saved.id } : local;
+      return local.ok ? { ...local, savedId: saved.id, interestsError } : local;
     },
     [register],
   );

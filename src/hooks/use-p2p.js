@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { ensureSession, selectIsApiAuthenticated } from "@/store/auth-slice.js";
-import { listCategories, listServices, listTopics, listUsers } from "@/api/p2p.js";
+import {
+  listCategories,
+  listServices,
+  listTopics,
+  listUsers,
+  listUserCategories,
+  listUserTopics,
+} from "@/api/p2p.js";
 import { getView } from "@/api/http.js";
 import { USER_TYPE, VIEWS } from "@/api/config.js";
+import { hasId } from "@/lib/utils.js";
 
 /**
  * Generic loader for one of the view-backed lists.
@@ -238,4 +246,68 @@ export function useUsers({ type, enabled = true, orderBy, sortDir, search } = {}
     [type, orderBy, sortDir, search],
   );
   return useResource(fetcher, { enabled: enabled && authed });
+}
+
+/** View 1703 — the categories one member has flagged as areas of interest. */
+export function useUserCategories({ userId, enabled = true } = {}) {
+  const authed = useSelector(selectIsApiAuthenticated);
+  const fetcher = useCallback(() => listUserCategories({ userId }), [userId]);
+  // Registration number 0 is a real id in this data, so test for null, not truthiness.
+  return useResource(fetcher, { enabled: enabled && authed && hasId(userId) });
+}
+
+/** View 1704 — the topics one member has flagged as interests. */
+export function useUserTopics({ userId, enabled = true } = {}) {
+  const authed = useSelector(selectIsApiAuthenticated);
+  const fetcher = useCallback(() => listUserTopics({ userId }), [userId]);
+  return useResource(fetcher, { enabled: enabled && authed && hasId(userId) });
+}
+
+/**
+ * The signed-in member's registration number.
+ *
+ * `regNo` is stamped onto the local user at login, but a session created before
+ * that existed — or restored from storage — can be missing it, which would make
+ * every interest screen look empty. So fall back to looking the member up by
+ * email. Returns null for an admin, who genuinely has no member row.
+ */
+export function useMyRegNo(user) {
+  const authed = useSelector(selectIsApiAuthenticated);
+  const known = hasId(user?.regNo) ? user.regNo : null;
+  const email = user?.email || "";
+
+  const [resolved, setResolved] = useState(known);
+  const [loading, setLoading] = useState(!hasId(known) && Boolean(email));
+
+  useEffect(() => {
+    if (hasId(known)) {
+      setResolved(known);
+      setLoading(false);
+      return;
+    }
+    if (!authed || !email) {
+      setResolved(null);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    listUsers({ page: 1, pagesize: 1, filters: { OM_USER_EMAIL: email } })
+      .then((res) => {
+        if (!cancelled) setResolved(hasId(res.data[0]?.id) ? res.data[0].id : null);
+      })
+      .catch(() => {
+        if (!cancelled) setResolved(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [known, email, authed]);
+
+  return { regNo: resolved, loading };
 }

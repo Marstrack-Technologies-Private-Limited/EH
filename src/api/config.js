@@ -18,6 +18,8 @@ export const VIEWS = {
   SERVICES: 1696, // MTVWP2PSERVICES
   NEW_SERVICE_ID: 1697, // MTVWNEWP2PSERVICEID
   USERS: 1699, // MTVWUSERMASTER — seekers + offerers
+  USER_CATEGORIES: 1703, // MTVWP2PUSERAREASOFINTERESTS
+  USER_TOPICS: 1704, // MTVWP2PUSERTOPICSOFINTERESTS
 };
 
 /** Stored procedures — write via globalSpHandler?spname=<id> */
@@ -26,11 +28,17 @@ export const SPS = {
   SAVE_TOPIC: 1695, // MT_INSERT_P2P_TOPIC
   SAVE_SERVICE: 1698, // MT_INSERT_P2P_SERVICE
   SAVE_USER: 1701, // MT_INSERT_USER_MASTER
+  USER_CATEGORY: 1702, // MT_INSERT_DELETE_USER_CATEGORIES
+  USER_TOPIC: 1705, // MT_INSERT_DELETE_USER_TOPICS
 };
 
 /** @NEWEXISTING discriminator — "NEW" creates (id 0), "EXISTING" updates. */
 export const NEW = "NEW";
 export const EXISTING = "EXISTING";
+
+/** @CREATEDELETE discriminator on SPs 1702 / 1705 — one endpoint does both. */
+export const CREATE = "CREATE";
+export const DELETE = "DELETE";
 
 /** OM_USER_SEEKER_GUIDANCE_ALL values (note: singular "SEEKER" in the column). */
 export const USER_TYPE = {

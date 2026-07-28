@@ -5,6 +5,16 @@ export function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Is this a usable record id?
+ *
+ * Registration number 0 is a real member in this data, so `if (id)` silently
+ * treats that member as "not signed in". Always test with this instead.
+ */
+export function hasId(id) {
+  return id !== null && id !== undefined && id !== "" && Number.isFinite(Number(id));
+}
+
 export function initials(name = "") {
   const parts = String(name).split(" ").filter(Boolean);
   // Two words → one letter each ("Aisha Khan" → AK).

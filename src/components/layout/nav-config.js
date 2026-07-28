@@ -5,6 +5,7 @@ import {
   MessagesSquare,
   Star,
   Shield,
+  Heart,
   User,
 } from "lucide-react";
 
@@ -14,6 +15,8 @@ export function navForRole(role) {
   const common = [{ label: "Dashboard", to: "/dashboard", icon: LayoutDashboard }];
   const chat = { label: "Messages", to: "/chat", icon: MessagesSquare };
   const profile = { label: "Profile", to: "/profile", icon: User };
+  // Areas + topics of interest — SPs 1702/1705, views 1703/1704.
+  const interests = { label: "My Interests", to: "/interests", icon: Heart };
 
   if (role === "admin") {
     return [
@@ -28,6 +31,7 @@ export function navForRole(role) {
   if (role === "offerer") {
     return [
       ...common,
+      interests,
       { label: "My Reviews", to: "/reviews", icon: Star },
       { label: "Discover", to: "/search", icon: Compass },
       chat,
@@ -38,6 +42,7 @@ export function navForRole(role) {
   // seeker (default)
   return [
     ...common,
+    interests,
     { label: "Discover", to: "/search", icon: Compass },
     { label: "Top Matches", to: "/matches", icon: Sparkles },
     chat,
