@@ -1,4 +1,10 @@
-import { LOGIN_MODE, MODULE_NAME, SERVICE_ACCOUNT, VIEWS } from "./config.js";
+import {
+  LOGIN_MODE,
+  MODULE_NAME,
+  SERVICE_ACCOUNT,
+  SERVICE_TOKENS,
+  VIEWS,
+} from "./config.js";
 import { getAuthTokens, getView, request, setAuthTokens } from "./http.js";
 import { normalizeUser } from "./p2p.js";
 
@@ -44,15 +50,15 @@ export async function loginRequest({ email, password, moduleName = MODULE_NAME }
  * provides one.
  */
 export async function loginMemberRequest({ email, password, mode }) {
-  const bootstrap = await loginRequest(SERVICE_ACCOUNT);
+  // No /cpanel/login round-trip: the module tokens are pre-issued and stable.
+  const bootstrap = { ...SERVICE_TOKENS };
 
   // getView reads tokens from the module-level holder, so seed it before use.
   const previous = getAuthTokens();
   setAuthTokens(bootstrap);
 
-  let rows;
-  try {
-    const res = await getView(VIEWS.USERS, {
+  const lookup = () =>
+    getView(VIEWS.USERS, {
       page: 1,
       pagesize: 2,
       filters: {
@@ -60,10 +66,27 @@ export async function loginMemberRequest({ email, password, mode }) {
         OM_USER_PASSWORD: password,
       },
     });
-    rows = res.data;
+
+  let rows;
+  try {
+    rows = (await lookup()).data;
   } catch (err) {
-    setAuthTokens(previous);
-    throw err;
+    // Only if the hardcoded tokens have been rotated do we pay for a real login.
+    if (err?.status === 401 || err?.status === 403) {
+      try {
+        const fresh = await loginRequest(SERVICE_ACCOUNT);
+        bootstrap.authToken = fresh.authToken;
+        bootstrap.sessionToken = fresh.sessionToken;
+        setAuthTokens(bootstrap);
+        rows = (await lookup()).data;
+      } catch (retryErr) {
+        setAuthTokens(previous);
+        throw retryErr;
+      }
+    } else {
+      setAuthTokens(previous);
+      throw err;
+    }
   }
 
   if (!rows.length) {

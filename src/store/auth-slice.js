@@ -1,6 +1,6 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import { loginByMode, loginRequest } from "@/api/auth.js";
-import { LOGIN_MODE, SERVICE_ACCOUNT } from "@/api/config.js";
+import { LOGIN_MODE, SERVICE_ACCOUNT, SERVICE_TOKENS } from "@/api/config.js";
 
 const initialState = {
   authToken: null,
@@ -32,6 +32,15 @@ export const ensureSession = createAsyncThunk(
   "auth/ensureSession",
   async (_, { getState, rejectWithValue }) => {
     if (getState().auth.authToken) return null;
+
+    // The module tokens are pre-issued and stable, so this costs no request.
+    if (SERVICE_TOKENS.authToken) {
+      return {
+        authToken: SERVICE_TOKENS.authToken,
+        sessionToken: SERVICE_TOKENS.sessionToken,
+      };
+    }
+
     try {
       const res = await loginRequest(SERVICE_ACCOUNT);
       return { authToken: res.authToken, sessionToken: res.sessionToken };

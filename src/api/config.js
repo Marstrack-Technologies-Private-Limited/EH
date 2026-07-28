@@ -57,11 +57,36 @@ export const LOGIN_MODE = {
 /**
  * Module service account. Seekers and offerers are not /cpanel/login users —
  * they live in MTVWUSERMASTER — so the app needs a session before it can look
- * them up. This bootstraps one.
+ * them up.
+ *
+ * Only used as a fallback now: SERVICE_TOKENS below is the normal path.
  */
 export const SERVICE_ACCOUNT = {
   email: import.meta.env.VITE_SERVICE_EMAIL || "siddique@gbsafrica.net",
   password: import.meta.env.VITE_SERVICE_PASSWORD || "siddique",
+};
+
+/**
+ * Pre-issued module tokens.
+ *
+ * These are long-lived on dev and don't rotate, so a seeker or offerer signing
+ * in uses them directly instead of calling /cpanel/login first — that removes
+ * one network round-trip from every member sign-in and every public page that
+ * needs to read the taxonomy.
+ *
+ * If the backend ever does rotate them, a 401/403 makes the app fall back to a
+ * real /cpanel/login once and carry on (see ensureServiceSession in auth.js),
+ * so a stale value here degrades rather than breaks.
+ *
+ * Override per environment with VITE_AUTH_TOKEN / VITE_SESSION_TOKEN.
+ */
+export const SERVICE_TOKENS = {
+  authToken:
+    import.meta.env.VITE_AUTH_TOKEN ||
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImVtYWlsIjoic2lkZGlxdWVAZ2JzYWZyaWNhLm5ldCJ9LCJpYXQiOjE3ODUyNzA2Njh9.g2kHwIwfNWJeApEDwqAkRdzAgVzsCXNd95l0z_167Ro",
+  sessionToken:
+    import.meta.env.VITE_SESSION_TOKEN ||
+    "NDRiYmI4OTQzZWJkOGIzYmQxNjFkMjBiZWEwNTM2MWU6Yzk1MzAxMDVjYmI0MjliZTRkNGE0ZDNkYjk2ZWY0OGEvNDRiYmI4OTQzZWJkOGIzYmQxNjFkMjBiZWEwNTM2MWU6NjRjMjRmYzgyNGM4NmE2YzExMzhiODNjZGYxNWE0OTcvNDRiYmI4OTQzZWJkOGIzYmQxNjFkMjBiZWEwNTM2MWU6ZThhNzFlMzVhMjZiYWFjOTQzZGY0ZTNlNzI2MGRjYjIvNDRiYmI4OTQzZWJkOGIzYmQxNjFkMjBiZWEwNTM2MWU6ZDc5Y2ViNDY4ZDdlMDRiNzI4OGEzOGQzOGZjZGY2MDI=",
 };
 
 export const DEFAULT_PAGE_SIZE = 100;
