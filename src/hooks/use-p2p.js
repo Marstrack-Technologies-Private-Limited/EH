@@ -311,3 +311,44 @@ export function useMyRegNo(user) {
 
   return { regNo: resolved, loading };
 }
+
+/**
+ * Every member's interests, indexed by registration number.
+ *
+ * The offerer directory needs each offerer's areas and topics. Fetching them
+ * per offerer would be one request per row, so both views are read whole once
+ * (they are small — one row per user/interest pair) and grouped client-side.
+ */
+export function useInterestIndex({ enabled = true } = {}) {
+  const authed = useSelector(selectIsApiAuthenticated);
+  const areasFetcher = useCallback(() => listUserCategories(), []);
+  const topicsFetcher = useCallback(() => listUserTopics(), []);
+
+  const areas = useResource(areasFetcher, { enabled: enabled && authed });
+  const topics = useResource(topicsFetcher, { enabled: enabled && authed });
+
+  const index = useMemo(() => {
+    const map = new Map();
+    const bucket = (id) => {
+      if (!map.has(id)) map.set(id, { areas: [], topics: [] });
+      return map.get(id);
+    };
+    for (const a of areas.data) bucket(a.userId).areas.push(a);
+    for (const t of topics.data) bucket(t.userId).topics.push(t);
+    return map;
+  }, [areas.data, topics.data]);
+
+  const reloadAreas = areas.reload;
+  const reloadTopics = topics.reload;
+  const reload = useCallback(() => {
+    reloadAreas();
+    reloadTopics();
+  }, [reloadAreas, reloadTopics]);
+
+  return {
+    index,
+    loading: areas.loading || topics.loading,
+    error: areas.error || topics.error,
+    reload,
+  };
+}

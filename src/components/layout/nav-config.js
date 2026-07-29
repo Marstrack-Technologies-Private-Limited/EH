@@ -6,6 +6,9 @@ import {
   Star,
   Shield,
   Heart,
+  UserSearch,
+  LifeBuoy,
+  MessagesSquare as ChatsIcon,
   User,
 } from "lucide-react";
 
@@ -42,6 +45,9 @@ export function navForRole(role) {
   // seeker (default)
   return [
     ...common,
+    { label: "Find Offerers", to: "/offerers", icon: UserSearch },
+    { label: "Seek Assistance", to: "/seek-assistance", icon: LifeBuoy },
+    { label: "My Chats", to: "/my-chats", icon: ChatsIcon },
     interests,
     { label: "Discover", to: "/search", icon: Compass },
     { label: "Top Matches", to: "/matches", icon: Sparkles },

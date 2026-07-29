@@ -9,6 +9,9 @@ import Search from "@/pages/Search.jsx";
 import Matches from "@/pages/Matches.jsx";
 import Profile from "@/pages/Profile.jsx";
 import Interests from "@/pages/Interests.jsx";
+import Offerers from "@/pages/Offerers.jsx";
+import SeekAssistance from "@/pages/SeekAssistance.jsx";
+import MyChats from "@/pages/MyChats.jsx";
 import UserProfile from "@/pages/UserProfile.jsx";
 import Chat from "@/pages/Chat.jsx";
 import Reviews from "@/pages/Reviews.jsx";
@@ -30,6 +33,9 @@ export default function App() {
             <Route path="/matches" element={<Matches />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/interests" element={<Interests />} />
+            <Route path="/offerers" element={<Offerers />} />
+            <Route path="/seek-assistance" element={<SeekAssistance />} />
+            <Route path="/my-chats" element={<MyChats />} />
             <Route path="/u/:id" element={<UserProfile />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/chat/:userId" element={<Chat />} />
