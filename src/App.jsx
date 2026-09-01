@@ -11,6 +11,7 @@ import Profile from "@/pages/Profile.jsx";
 import Interests from "@/pages/Interests.jsx";
 import Offerers from "@/pages/Offerers.jsx";
 import SeekAssistance from "@/pages/SeekAssistance.jsx";
+import Requests from "@/pages/Requests.jsx";
 import MyChats from "@/pages/MyChats.jsx";
 import UserProfile from "@/pages/UserProfile.jsx";
 import Chat from "@/pages/Chat.jsx";
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="/interests" element={<Interests />} />
             <Route path="/offerers" element={<Offerers />} />
             <Route path="/seek-assistance" element={<SeekAssistance />} />
+            <Route path="/requests" element={<Requests />} />
             <Route path="/my-chats" element={<MyChats />} />
             <Route path="/u/:id" element={<UserProfile />} />
             <Route path="/chat" element={<Chat />} />

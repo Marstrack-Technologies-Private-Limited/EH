@@ -8,6 +8,7 @@ import {
   Heart,
   UserSearch,
   LifeBuoy,
+  Inbox,
   MessagesSquare as ChatsIcon,
   User,
 } from "lucide-react";
@@ -34,6 +35,8 @@ export function navForRole(role) {
   if (role === "offerer") {
     return [
       ...common,
+      // Open seeks in the categories this offerer signed up for — views 1703 + 1818.
+      { label: "Seeker Requests", to: "/requests", icon: Inbox },
       interests,
       { label: "My Reviews", to: "/reviews", icon: Star },
       { label: "Discover", to: "/search", icon: Compass },

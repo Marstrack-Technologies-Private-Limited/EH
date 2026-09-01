@@ -1,4 +1,4 @@
-import { BASE_URL } from "./config.js";
+import { BASE_URL, FILE_UPLOAD_URL } from "./config.js";
 
 /**
  * Token holder. The redux auth slice pushes tokens in here (see store/index.js)
@@ -129,6 +129,7 @@ export async function getView(
     orderBy,
     sortDir = "ASC",
     searchAny,
+    anyOf,
     distinctColumns,
   } = {},
 ) {
@@ -154,6 +155,22 @@ export async function getView(
       qs.append(`orgroup1col${m}`, col);
       qs.append(`orgroup1op${m}`, "like");
       qs.append(`orgroup1val${m}`, searchAny.text);
+    });
+  }
+
+  // "column equals any of these values" — SQL IN, expressed as an OR group.
+  // Members inside a group are OR-ed; separate groups are AND-ed, so this has
+  // to fit in ONE group and is therefore capped at the group's 6 members.
+  // Callers with more values must narrow client-side instead (see
+  // MAX_ANY_OF_VALUES in p2p.js).
+  if (anyOf?.column && anyOf.values?.length) {
+    // Group 2, so it composes with a searchAny in group 1 rather than
+    // overwriting its members.
+    anyOf.values.slice(0, 6).forEach((value, i) => {
+      const m = i + 1;
+      qs.append(`orgroup2col${m}`, anyOf.column);
+      qs.append(`orgroup2op${m}`, "eq");
+      qs.append(`orgroup2val${m}`, String(value));
     });
   }
 
@@ -216,6 +233,60 @@ export async function callSp(spname, params) {
     objectId: spname,
     kind: "sp",
   });
+}
+
+/**
+ * Upload one file and return the URL it was stored at.
+ *
+ * This does not go through `request`: it targets a different host, sends
+ * multipart rather than JSON, and answers with a bare URL string instead of the
+ * usual envelope. See FILE_UPLOAD_URL in config.js for the verified contract.
+ *
+ * @param {File} file
+ * @returns {Promise<string>} public URL of the stored file
+ */
+export async function uploadFile(file) {
+  if (!file) throw new ApiError("No file was given to upload.");
+
+  const form = new FormData();
+  // The field name is fixed by the API — anything else is ignored.
+  form.append("imageValue", file);
+
+  let res;
+  try {
+    res = await fetch(FILE_UPLOAD_URL, {
+      method: "POST",
+      // Deliberately no content-type: the browser has to set the multipart
+      // boundary itself, and setting it by hand breaks the upload.
+      headers: tokens.sessionToken ? { "session-token": tokens.sessionToken } : {},
+      body: form,
+    });
+  } catch {
+    throw new ApiError(
+      `Could not reach the file service — ${file.name} was not uploaded.`,
+    );
+  }
+
+  const text = (await res.text()).trim();
+
+  if (!res.ok) {
+    throw new ApiError(
+      messageFrom(text, `Upload failed with status ${res.status}`) +
+        ` (${file.name})`,
+      { status: res.status, body: text },
+    );
+  }
+
+  // A 201 carrying anything but a URL means the contract changed; treating that
+  // as success would store an error message as if it were a file.
+  if (!/^https?:\/\//i.test(text)) {
+    throw new ApiError(
+      `The file service did not return a URL for ${file.name}.`,
+      { status: res.status, body: text },
+    );
+  }
+
+  return text;
 }
 
 export { request };

@@ -302,3 +302,147 @@ grid must be built mobile-first and validated at mobile size **before** desktop.
 - `src/api/auth.js` — `/cpanel/login`
 - `src/store/auth-slice.js` + `src/store/index.js` — tokens in redux, persisted, pushed into `http.js`
 - `src/hooks/use-p2p.js` — `useCategories` / `useTopics` / `useServices` / `useUsers`
+
+## Seek assistance objects (added 2026-09-02, all verified live)
+
+| Object | ID | Type | Status |
+|---|---|---|---|
+| VIEW SEEKS CARRIED OUT BY SEEKER | 1818 | view | ✅ 200 — filter by `OT_SEEKER_ID`, sort by `OT_SEEK_ASSISTANCE_ID` |
+| SEEK NUMBER AUTO GENERATED | 1819 | view | ✅ `{"NEWNO":1}` — read positionally |
+| VIEW SEEK ASSISTANCE DETAILS | 1820 | view | ⚠️ 200 but empty and **unusable** — only `OT_SEEK_ASSISTANCE_ID` resolves as a filter, ~25 other names 501. No detail-save SP exists |
+| Seek assistance header | 1821 | sp | ✅ 201 — NEW + EXISTING both verified, full round-trip |
+
+```jsonc
+// 1821 — seek assistance header. NOTE the OT_ prefix on every parameter.
+{"OT_SEEK_ASSISTANCE_ID":0,"OT_SEEK_ASSISTANCE_DATE":"2026-09-02","OT_SEEK_ASSISTANCE_TIME":"2026-09-02 09:15:00","OT_SEEKER_ID":9,"OT_SEEKER_CATEGORY_ID":4,"OT_SEEKER_NARRATION":"","OT_SEEKER_URGENCY_OF_HELP":"Critical","OT_SEEKER_REQUIRED_TO_BE_CONTACTED_ON_EMAIL":1,"OT_SEEKER_REQUIRED_TO_BE_CONTACTED_ON_WHATSAPP":0,"OT_SEEKER_REQUIRED_TO_BE_CONTACTED_ON_CALL":"","OT_SEEKER_REQUIRED_TO_BE_CONTACTED_PREFERRED_TIME":"","OT_SEEKER_REQUIRED_TO_BE_CONTACTED_PREFERRED_WEEK_DAY":"","NEWEXISTING":"NEW","SUCCESS_STATUS":"","ERROR_STATUS":""}
+```
+
+Four ways 1821 differs from 1692/1695/1698/1701 — all four cost a debugging cycle:
+
+1. **Parameters carry the `OT_` prefix.** The unprefixed style 501s.
+2. **It returns `{"message":"Document Saved"}`, not the new id.** Read view 1819
+   *before* the write to know the ticket number.
+3. **No foreign-key check.** `OT_SEEKER_ID: 99999` saves with 201 — validate in
+   the UI.
+4. **An empty DATETIME stores `1900-01-01`, not NULL.** Treat the epoch as
+   "not set" on read (`dateOrNull` in `src/api/p2p.js`).
+
+BIT round-trips correctly here, unlike `USERACTIVE` on 1701.
+
+Fixed dropdown values from the spec: urgency = `Critical` / `Semi urgent` /
+`Moderate` / `Can wait`; weekday = full day names. Both in `src/api/config.js`
+as `URGENCY_OPTIONS` and `WEEK_DAYS`.
+
+### Seek detail + attachments (added 2026-09-02)
+
+| Object | ID | Type | Status |
+|---|---|---|---|
+| VIEW SEEK ASSISTANCE DETAILS | 1820 | view | ✅ `{OT_SEEK_ASSISTANCE_ID, OT_SEEK_ASSISTANCE_PROBLEM_REPORTED}` |
+| MT_INSERT_SEEKER_DETAILS | 1822 | sp | ✅ 201 — **upsert on the seek id** |
+| MT_DELETE_SEEKER_DETAILS | 1823 | sp | ✅ 201 — **ignores the text param** |
+| MTVWSEEKASSISTANCEDOCUMENTS | 1824 | view | ✅ 200, empty — `{OT_SEEK_ASSISTANCE_ID, OT_SEEK_DOCUMENT}` |
+| MTVWSEEKASSISTANCEIMAGES | 1825 | view | ✅ 200, empty — same shape |
+| Attachment save SPs | — | — | ❌ **no usable id.** The sheet gives 1824 to the view *and* three SPs; 1826+ are 403 |
+
+```jsonc
+// 1822 save detail / 1823 delete detail — same parameter set
+{"OT_SEEK_ASSISTANCE_ID":4,"OT_SEEK_PROBLEMS_REPORTED":"…","SUCCESS_STATUS":"","ERROR_STATUS":""}
+```
+
+Three things to know before touching these:
+
+1. **1822 upserts.** A seek has exactly ONE detail row — saving twice with
+   different text replaces, it does not append. Compose the whole selection into
+   the one VARCHAR(MAX).
+2. **1823 deletes by seek id alone.** The text parameter is required by the
+   parameter set but plays no part in matching.
+3. **The names disagree across objects.** SP parameter
+   `OT_SEEK_PROBLEMS_REPORTED` (plural) === view column
+   `OT_SEEK_ASSISTANCE_PROBLEM_REPORTED` (singular, with ASSISTANCE).
+
+Order of writes on submit: 1819 (reserve number) → 1821 (header) → 1822 (detail,
+keyed on the header id). Verified end-to-end.
+
+## File upload — `api.tech23.net/fileupload/uploadImage`
+
+The platform's only upload endpoint, shared with the WORKSHOP module
+(`BreakdownLogin.jsx`, `TruckInspection.jsx`, `EmployeeMasterCreation.jsx`).
+Wrapped as `uploadFile` in `src/api/http.js`.
+
+```bash
+curl -X POST "https://api.tech23.net/fileupload/uploadImage" \
+  -H "session-token: $ST" -F "imageValue=@photo.png"
+# 201, body is the URL as a plain string:
+# https://marstrackstorage.s3.amazonaws.com/<uuid>
+```
+
+| Fact | Detail |
+|---|---|
+| Host | **api.tech23.net**, not devapi — there is no dev equivalent |
+| Field name | Exactly `imageValue`; anything else is ignored |
+| Auth | `session-token` only. Verified **optional** — an anonymous POST also 201s |
+| content-type | **Never set it.** The browser must add the multipart boundary |
+| Response | The S3 URL as a **plain string**, not JSON |
+| File types | **Any** — despite the name. `.txt` and `.pdf` verified round-trip |
+| Privacy | The URL is **publicly readable with no token** |
+| Other paths | `uploadFile` / `uploadDocument` / `uploadDoc` / `upload` all 404 |
+
+No SP yet accepts an attachment row: probing 1706–1708, 1810–1817, 1824 and 1825
+with `{OT_SEEK_ASSISTANCE_ID, OT_SEEK_DOCUMENT|OT_SEEK_IMAGE, SUCCESS_STATUS,
+ERROR_STATUS}` returned no 201. Until one exists, seek attachments are stored as
+URLs inside the SP 1822 detail line.
+
+### Seek attachments — SPs 1826–1829 (added 2026-09-02)
+
+Upload with `uploadFile` (see the file-upload section), then link the returned
+URL. **1826 and 1827 take the identical parameter set and append** — many
+attachments per seek, unlike SP 1822 which upserts.
+
+```jsonc
+// 1826 document / 1827 image
+{"OT_SEEK_ASSISTANCE_ID":6,"OT_SEEK_DOCUMENT":"https://…","SUCCESS_STATUS":"","ERROR_STATUS":""}
+```
+
+| Object | Status |
+|---|---|
+| 1826 `MT_INSERT_SEEKER_DOCUMENT_ATTACHMENT` | ✅ 201, row appears in view 1824 |
+| 1827 `MT_INSERT_SEEKER_IMAGE_ATTACHMENT` | ⚠️ 201, but writes into **1824**, not 1825 |
+| 1828 `MT_DELETE_SEEKER_DOCUMENT_ATTACHMENT` | ❌ **501 on every parameter set tried** — params unpublished |
+| 1829 `MT_DELETE_SEEKER_IMAGE_ATTACHMENT` | ⚠️ 201 but a **no-op** (targets the empty images table) |
+| 1830+ | 403 — do not exist |
+
+**View 1825 is never populated.** Confirmed with two distinct images. So read
+**both** 1824 and 1825 and merge — `listSeekAttachments` does this, which is
+correct now and stays correct once 1827 is repointed. `OT_SEEK_CREATED_DATE`
+comes back on the row but 501s as a filter: select-only.
+
+Do not call 1828 or 1829 — attachments are add-only until both are fixed.
+
+### Offerer inbox — seeks filtered to the categories an offerer serves
+
+`useOffererRequests` (`src/hooks/use-p2p.js`) → `listSeeksForCategories`.
+
+View 1703 gives the offerer's categories; view 1818 gives the seeks. **Up to six
+category ids filter server-side through one OR group**, which is the hard cap —
+a group holds 6 members and separate groups AND rather than OR:
+
+```
+&orgroup2col1=OT_SEEKER_CATEGORY_ID&orgroup2op1=eq&orgroup2val1=1
+&orgroup2col2=OT_SEEKER_CATEGORY_ID&orgroup2op2=eq&orgroup2val2=2
+```
+
+`getView({ anyOf: { column, values } })` builds exactly this, in group 2 so it
+composes with a `searchAny` in group 1. Past six values, read the view whole and
+narrow client-side.
+
+Verified live: offerer 2 (categories 1,2,3) → only seek #7 (category 2); offerer
+12 (category 1) → 0 rows. An offerer with no categories gets an empty list,
+never "everything".
+
+`OT_SEEKER_ASSISTANCE_CLOSED` is VARCHAR with **no defined vocabulary and no SP
+parameter** — nothing can close a seek yet, so every row reads null. `isSeekOpen`
+in `p2p.js` treats absent-or-negative as open; that is the one line to change
+when the values land.
+
+**There is no offerer-response object.** 1830–1845 are all 403. The compose UI on
+`/requests` is held until one is issued.

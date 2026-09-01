@@ -8,6 +8,10 @@ import {
   listUsers,
   listUserCategories,
   listUserTopics,
+  listSeeks,
+  listSeekDetails,
+  listSeekAttachments,
+  listSeeksForCategories,
 } from "@/api/p2p.js";
 import { getView } from "@/api/http.js";
 import { USER_TYPE, VIEWS } from "@/api/config.js";
@@ -261,6 +265,127 @@ export function useUserTopics({ userId, enabled = true } = {}) {
   const authed = useSelector(selectIsApiAuthenticated);
   const fetcher = useCallback(() => listUserTopics({ userId }), [userId]);
   return useResource(fetcher, { enabled: enabled && authed && hasId(userId) });
+}
+
+/**
+ * View 1818 — the seeks one seeker has raised, newest first.
+ *
+ * Filtered on OT_SEEKER_ID, which holds the seeker's registration number.
+ * Registration number 0 is a real id here, so gate on hasId, not truthiness.
+ */
+export function useSeeks({ seekerId, enabled = true } = {}) {
+  const authed = useSelector(selectIsApiAuthenticated);
+  const fetcher = useCallback(
+    () => listSeeks({ seekerId, orderBy: "OT_SEEK_ASSISTANCE_ID", sortDir: "DESC" }),
+    [seekerId],
+  );
+  return useResource(fetcher, { enabled: enabled && authed && hasId(seekerId) });
+}
+
+/**
+ * View 1820 — the "problems reported" text, keyed by seek id.
+ *
+ * 1820 carries no seeker column, so a seeker's own details cannot be filtered
+ * server-side. Reading the view whole and indexing by seek id costs one request
+ * instead of one per listed seek; there is exactly one row per seek, so this
+ * stays proportional to the number of seeks rather than to their contents.
+ */
+export function useSeekDetailIndex({ enabled = true } = {}) {
+  const authed = useSelector(selectIsApiAuthenticated);
+  const fetcher = useCallback(() => listSeekDetails(), []);
+  const details = useResource(fetcher, { enabled: enabled && authed });
+
+  const index = useMemo(() => {
+    const map = new Map();
+    for (const d of details.data) map.set(d.seekId, d.problems);
+    return map;
+  }, [details.data]);
+
+  return {
+    index,
+    loading: details.loading,
+    error: details.error,
+    reload: details.reload,
+  };
+}
+
+/**
+ * The seeker requests one offerer is entitled to answer.
+ *
+ * Two steps, because the entitlement is the offerer's own areas of interest:
+ * read their categories from view 1703, then read the open seeks raised against
+ * those categories from view 1818.
+ *
+ * `categoriesLoading` is reported separately so the page can tell "still
+ * working it out" apart from "you serve no categories, so there is nothing to
+ * show" — those need very different empty states.
+ */
+export function useOffererRequests({ offererId, includeClosed = false, enabled = true } = {}) {
+  const authed = useSelector(selectIsApiAuthenticated);
+  const areas = useUserCategories({ userId: offererId, enabled: enabled && authed });
+
+  const categoryIds = useMemo(
+    () => [...new Set(areas.data.map((a) => a.categoryId).filter(Boolean))],
+    [areas.data],
+  );
+
+  // Key on the joined ids, not the array identity, so a reload that returns the
+  // same categories does not refetch the seeks.
+  const idsKey = categoryIds.join(",");
+  const fetcher = useCallback(
+    () => listSeeksForCategories({ categoryIds: idsKey ? idsKey.split(",") : [], includeClosed }),
+    [idsKey, includeClosed],
+  );
+
+  const seeks = useResource(fetcher, {
+    enabled: enabled && authed && hasId(offererId) && categoryIds.length > 0,
+  });
+
+  const reloadAreas = areas.reload;
+  const reloadSeeks = seeks.reload;
+  const reload = useCallback(() => {
+    reloadAreas();
+    reloadSeeks();
+  }, [reloadAreas, reloadSeeks]);
+
+  return {
+    data: seeks.data,
+    categories: areas.data,
+    categoryIds,
+    categoriesLoading: areas.loading,
+    loading: areas.loading || (categoryIds.length > 0 && seeks.loading),
+    error: areas.error || seeks.error,
+    reload,
+  };
+}
+
+/**
+ * Views 1824 + 1825 — attachments grouped by seek id.
+ *
+ * Neither view carries a seeker column, so the same whole-read-and-index
+ * approach as useSeekDetailIndex applies. One seek can have many attachments,
+ * unlike its single detail row.
+ */
+export function useSeekAttachmentIndex({ enabled = true } = {}) {
+  const authed = useSelector(selectIsApiAuthenticated);
+  const fetcher = useCallback(() => listSeekAttachments(), []);
+  const attachments = useResource(fetcher, { enabled: enabled && authed });
+
+  const index = useMemo(() => {
+    const map = new Map();
+    for (const a of attachments.data) {
+      if (!map.has(a.seekId)) map.set(a.seekId, []);
+      map.get(a.seekId).push(a);
+    }
+    return map;
+  }, [attachments.data]);
+
+  return {
+    index,
+    loading: attachments.loading,
+    error: attachments.error,
+    reload: attachments.reload,
+  };
 }
 
 /**

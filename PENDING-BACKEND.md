@@ -3,31 +3,156 @@
 What is **not** implemented in this frontend, and exactly what is needed to
 finish it. Everything else in the app runs on live `devapi.tech23.net` objects.
 
-Last verified against dev: **2026-07-30**.
+Last verified against dev: **2026-09-02**.
 
 ---
 
-## 1. Seek Assistance — no ticket object
+## 1. Seek Assistance — fully wired; three attachment defects open
 
 **Screen:** `/seek-assistance` (`src/pages/SeekAssistance.jsx`)
 
-The form is complete and validates, but **Submit is deliberately held** — it
-reports that no endpoint exists rather than faking a save.
+**Wired and working** as of 2026-09-02. Submit runs the whole sequence,
+verified live end-to-end: files upload → view 1819 reserves the number →
+SP 1821 writes the header → SP 1822 the detail → SP 1826/1827 link each
+attachment → views 1818 / 1820 / 1824 read it all back with the exact values sent.
 
-Working today: the audience selector, the seeker's topics prefilled from view
-1704, urgency, contact preference, and file selection in the browser.
+| Object | Role | Notes |
+|---|---|---|
+| 1818 `MTVWSEEKASSISTANCEHEADER` | read seeks | filter `OT_SEEKER_ID`, sort `OT_SEEK_ASSISTANCE_ID` |
+| 1819 `MTVWNEWSEEKASSISTANCENO` | next ticket no | `{"NEWNO":n}`, read positionally |
+| 1820 view seek details | read detail | columns: `OT_SEEK_ASSISTANCE_ID`, `OT_SEEK_ASSISTANCE_PROBLEM_REPORTED` |
+| 1821 `MT_INSERT_SEEKER_HEADER` | save header | NEW + EXISTING both verified |
+| 1822 `MT_INSERT_SEEKER_DETAILS` | save detail | **upsert**, see below |
+| 1823 `MT_DELETE_SEEKER_DETAILS` | delete detail | **ignores the text**, see below |
+| 1824 / 1825 documents / images | read attachments | `{OT_SEEK_ASSISTANCE_ID, OT_SEEK_DOCUMENT, OT_SEEK_CREATED_DATE}` — **1825 never populated**, see defects |
+| 1826 `MT_INSERT_SEEKER_DOCUMENT_ATTACHMENT` | link a document | ✅ appends, many per seek |
+| 1827 `MT_INSERT_SEEKER_IMAGE_ATTACHMENT` | link an image | ⚠️ 201 but writes into 1824 |
+| 1828 `MT_DELETE_SEEKER_DOCUMENT_ATTACHMENT` | delete a document | ❌ 501 on every shape tried |
+| 1829 `MT_DELETE_SEEKER_IMAGE_ATTACHMENT` | delete an image | ⚠️ 201 but a no-op |
 
-Needed:
+### Traps, all confirmed by experiment
+
+**SP 1821** differs from 1692/1695/1698/1701 in four ways:
+
+| Trap | Detail |
+|---|---|
+| Parameter names | Carry the `OT_` prefix, exactly as declared. The unprefixed style **501s** |
+| Return value | `{"message":"Document Saved"}` — **not** the new id. Read 1819 *before* saving |
+| Foreign keys | **Not checked.** `OT_SEEKER_ID: 99999` saved with 201 |
+| Empty DATETIME | `""` is accepted but stores **1900-01-01, not NULL**. `dateOrNull` treats the epoch as unset |
+
+BIT round-trips correctly on 1821/1822 — no repeat of the 1701 `USERACTIVE` defect.
+
+**SP 1822 upserts on the seek id — a seek has exactly ONE detail row.** Saving
+twice against seek 3 with different text left one row holding the second value;
+it did not append. So there is no row-per-topic: the whole selection has to be
+composed into the single `VARCHAR(MAX)`. `composeProblems` / `parseProblems` in
+the page do that, and are a **stopgap to be deleted** if a real detail table with
+a topic id and an offerer id ever lands.
+
+**SP 1823 ignores `@OT_SEEK_PROBLEMS_REPORTED`.** It must be sent or the call
+501s, but it takes no part in matching — deleting seek 3 while passing text that
+did not match its row still removed that row. Deletion is by seek id alone.
+
+**Naming mismatch:** the SP parameter is `OT_SEEK_PROBLEMS_REPORTED` (plural
+"PROBLEMS"), the view column is `OT_SEEK_ASSISTANCE_PROBLEM_REPORTED` (singular,
+with ASSISTANCE). Same field.
+
+
+### Attachments — upload and link both work; deletes do not
+
+`uploadFile` (`src/api/http.js`) → `saveSeekAttachment` (`src/api/p2p.js`).
+
+```
+POST https://api.tech23.net/fileupload/uploadImage
+multipart, file in a field named exactly `imageValue`
+header: session-token       (verified OPTIONAL — an anonymous POST also 201s)
+→ 201, body is the S3 URL as a PLAIN STRING, not JSON
+```
+
+Then link it — 1826 and 1827 take the identical parameter set, and **append**
+(many attachments per seek, unlike the single detail row):
+
+```jsonc
+{"OT_SEEK_ASSISTANCE_ID":6,"OT_SEEK_DOCUMENT":"https://…","SUCCESS_STATUS":"","ERROR_STATUS":""}
+```
+
+Verified end-to-end 2026-09-02: upload → 1819 → 1821 → 1822 → 1826 + 1827 →
+read back, with the URLs still serving the right bytes and content-types.
+
+Upload endpoint facts:
+
+- It is on **api.tech23.net, not devapi** — there is no dev equivalent.
+- **Despite the name it takes any file type.** `.txt` and `.pdf` both verified.
+- The returned URL is **publicly readable with no token**. Anything uploaded is
+  effectively public — worth knowing before seekers attach private documents.
+- `uploadFile` / `uploadDocument` / `uploadDoc` / `upload` all **404**.
+- Do **not** set `content-type`; the browser must add the multipart boundary.
+
+### Three attachment defects to fix
+
+**Re-tested 2026-09-02 after the sheet said the attachment SPs and views were
+updated: all three behave exactly as before.** Nothing in the app needs to
+change when they are fixed — see the merge note below.
+
+| # | Object | Problem |
+|---|---|---|
+| 1 | **SP 1827** `MT_INSERT_SEEKER_IMAGE_ATTACHMENT` | Answers 201 but writes into the **documents** table behind view 1824. **View 1825 is never populated** — confirmed with two distinct images, 1825 stayed at 0 rows |
+| 2 | **SP 1828** `MT_DELETE_SEEKER_DOCUMENT_ATTACHMENT` | **501 on every parameter set tried**, including the exact shape its insert twin 1826 accepts. Also tried: id only, document only, + `OT_SEEK_CREATED_DATE`, `OT_SEEK_DOCUMENT_ID`, + `NEWEXISTING`, and without the status params. **Its declared parameters have not been published** |
+| 3 | **SP 1829** `MT_DELETE_SEEKER_IMAGE_ATTACHMENT` | Answers 201 but **removes nothing** — a consequence of #1, since it targets the empty images table |
+
+Because of #2 and #3 the app's attachment list is **add-only**: nothing calls
+either delete. `listSeekAttachments` reads **both** views and merges, so it is
+correct today (everything arrives via 1824) and stays correct with no code
+change once 1827 is repointed.
+
+`OT_SEEK_CREATED_DATE` is returned on the row but **cannot be filtered on** —
+it 501s as a query param. Select-only.
+
+### Still needed
 
 | Need | Detail |
 |---|---|
-| Save SP | Object ID + full parameter list for creating a ticket |
-| Fields to persist | seeker reg no, audience (single offerer / category / topic set), issue text, urgency, contact method + value, created date |
-| Topic set | A ticket can target many topics — either a repeating param or a child SP called per topic |
-| File upload | No upload endpoint exists. Multipart target, or a document SP plus a storage URL |
-| Read-back view | To list a seeker's own tickets and their status |
+| Close / resolve SP | `OT_SEEKER_ASSISTANCE_SUCCESS_FAILURE`, `_CLOSED`, `_CLOSED_DATE` are on 1818 but have no parameter on 1821, so they are always null |
+| `OT_SEEK_ASSISTANCE_SEEKER_ID` | On 1818, no parameter on 1821, always null. Distinct from `OT_SEEKER_ID` — dead column, or is 1821 incomplete? |
+| Proper detail table | One row per topic plus an offerer id, so the compose/parse stopgap can go |
+| Seeker filter on 1820 | 1820 has no seeker column, so a seeker's details cannot be filtered server-side — the app reads the view whole and indexes by seek id |
 
-## 2. My Chats — no thread or message objects
+> Dev rows 1–6 in view 1818 are probe artifacts, narration prefixed
+> `[dev test row`, with attachment rows against seeks 4–6 in view 1824. There is
+> no header-delete SP (1830+ answer 403) and no working attachment delete, so
+> those can only be cleared in SQL. Detail rows *can* be removed with SP 1823.
+## 2. Offerer responses — no response object
+
+**Screen:** `/requests` (`src/pages/Requests.jsx`)
+
+The offerer inbox is **live and working**: view 1703 gives the categories the
+offerer signed up for, view 1818 gives the open seeks raised against those
+categories, view 1820 the topics and views 1824/1825 the attachments.
+
+Category gating verified live 2026-09-02 — offerer 2 (categories 1, 2, 3) sees
+seek #7 in category 2 and **not** the six category-4 seeks; offerer 12
+(category 1 only) sees none. Up to six categories filter server-side through one
+OR group (`orgroup2*`); beyond six the view is read whole and narrowed in the
+client, because a group holds only six members and groups AND rather than OR.
+
+**Responding is built but held.** The compose box validates and previews, then
+reports that no endpoint exists rather than faking a save.
+
+| Need | Detail |
+|---|---|
+| **Response SP** | Object id + full parameter list. Presumably seek id, offerer reg no, response text, date/time |
+| **Response view** | So a seeker sees replies in their own login, and the offerer sees what they already sent |
+| **Close status vocabulary** | `OT_SEEKER_ASSISTANCE_CLOSED` is VARCHAR(100) with no defined values, and **SP 1821 has no parameter for it** — so nothing can close a seek and every row reads null. `isSeekOpen` in `p2p.js` is deliberately lenient (absent or an obvious negative = open) and is the single line to change once the values are published |
+| Close / resolve SP | Needed alongside the vocabulary, to write `_CLOSED`, `_CLOSED_DATE` and `_SUCCESS_FAILURE` |
+| WhatsApp + email delivery | The seek stores the seeker's preference (`..._ON_EMAIL`, `..._ON_WHATSAPP`, `..._ON_CALL`) and the screen shows it, but sending is the backend's to trigger. No endpoint exists |
+
+> "Active and not closed": there is no active flag on a seek, and the only
+> candidate — `OM_USER_ACTIVE` on the seeker — is the known-broken column that
+> always reads true (section 6, the user SP defect). So the list filters on *not closed* alone.
+> Say if "active" was meant to be something else.
+
+## 3. My Chats — no thread or message objects
 
 **Screen:** `/my-chats` (`src/pages/MyChats.jsx`)
 
@@ -48,7 +173,7 @@ Needed:
 | Presence | Online/offline per user. Currently a placeholder dot |
 | Email notification | Spec says an offline recipient is emailed. No trigger or endpoint exists |
 
-## 3. Offerer profile extras — no source columns
+## 4. Offerer profile extras — no source columns
 
 **Screen:** `/offerers` (`src/pages/Offerers.jsx`)
 
@@ -62,23 +187,21 @@ note on the page:
 - **Testimonials** — no view
 - **Cases handled per area** — needs ticket data, which doesn't exist yet
 
-## 4. Undocumented objects found while probing
+## 5. Undocumented objects found while probing
 
-Discovered by sweeping object IDs. `501` means the object is deployed but the
-posted parameters don't match; `403` means no such object (`spname=1800` → 403).
+Re-swept 2026-09-02. `501` means the object is registered but the request did
+not match it; `403` means no such object.
 
 | Object | Finding |
 |---|---|
-| **SP 1706** | Deployed, undocumented — 501 on an empty body |
-| **SP 1707** | Deployed, undocumented — 501 on an empty body |
-| **SP 1708** | Deployed, undocumented — 501 on an empty body |
-| SP 1709–1720 | 403 — do not exist |
-| **View 1700** | A stale duplicate of `MTVWUSERMASTER`: same 14 rows as 1699 but missing `OM_USER_DOB`. Worth dropping so nobody wires the wrong one |
-
-**1706 / 1707 / 1708 may be the ticket and chat SPs.** Their parameter names are
-needed — a 501 gives no hint, and guessing would write bad rows.
-
-## 5. Still-open defect
+| **SP 1706 / 1707 / 1708** | Registered, undocumented — 501 on an empty body |
+| SP 1709–1720, 1750, 1800 | 403 — do not exist |
+| **1810–1817** | Registered, undocumented — 501 as a view *and* as an SP |
+| 1818–1825 | Documented and in use — see section 1 |
+| 1826–1829 | Attachment SPs — deployed and documented, see section 1 |
+| **1830–1845** | 403 — do not exist. So there is still **no header-delete SP** and no offerer-response object |
+| View 1700 | A stale duplicate of `MTVWUSERMASTER`: same rows as 1699 but missing `OM_USER_DOB`. Worth dropping so nobody wires the wrong one |
+## 6. Still-open defect
 
 **SP 1701 `@USERACTIVE` is not persisted.** Creating or updating with `0` (or
 `false`) stores `true`; `OM_USER_ACTIVE` never reflects what was sent. In the
@@ -90,7 +213,7 @@ saying the checkbox is ignored.
 save and read back. Note the 1701 parameter set changed — the old 12-param body
 now 501s.)*
 
-## 6. Security items to close before any public deploy
+## 7. Security items to close before any public deploy
 
 Both are consequences of what the API currently offers, not oversights:
 
