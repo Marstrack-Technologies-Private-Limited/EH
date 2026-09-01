@@ -15,6 +15,31 @@ const URGENCY_TONE = {
   "Can wait": "bg-muted text-muted-foreground",
 };
 
+/** Clock only — the date half of a preferred-contact time carries no meaning. */
+function formatTime(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDate(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** One labelled value. Renders an em dash rather than vanishing when empty. */
+function Field({ label, value }) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70">{label}</p>
+      <p className="text-xs">{value || "—"}</p>
+    </div>
+  );
+}
+
 function formatWhen(dateValue, timeValue) {
   const d = dateValue ? new Date(dateValue) : null;
   const t = timeValue ? new Date(timeValue) : null;
@@ -92,7 +117,8 @@ export function SeekViewerDialog({
   seek,
   detail,
   attachments = [],
-  seekerName,
+  seeker,
+  categoryName,
   open,
   onOpenChange,
 }) {
@@ -106,13 +132,14 @@ export function SeekViewerDialog({
         seek={seek}
         detail={detail}
         attachments={attachments}
-        seekerName={seekerName}
+        seeker={seeker}
+        categoryName={categoryName}
       />
     </Dialog>
   );
 }
 
-function SeekViewerBody({ seek, detail, attachments, seekerName }) {
+function SeekViewerBody({ seek, detail, attachments, seeker, categoryName }) {
   const [activeIndex, setActiveIndex] = useState(0);
 
   const active = attachments[Math.min(activeIndex, attachments.length - 1)];
@@ -145,7 +172,8 @@ function SeekViewerBody({ seek, detail, attachments, seekerName }) {
             </span>
           </DialogTitle>
           <p className="text-[11px] text-muted-foreground">
-            {seekerName ? `${seekerName} · ` : ""}
+            {seeker?.name ? `${seeker.name} · ` : ""}
+            {categoryName ? `${categoryName} · ` : ""}
             {formatWhen(seek.raisedOn, seek.raisedAt)}
           </p>
         </DialogHeader>
@@ -178,26 +206,26 @@ function SeekViewerBody({ seek, detail, attachments, seekerName }) {
             </section>
           )}
 
-          {detail?.to && (
-            <section>
-              <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
-                Sent to
-              </p>
-              <p className="text-xs">{detail.to}</p>
-            </section>
-          )}
-
-          {(contact.length > 0 || seek.preferredWeekDay) && (
-            <section>
-              <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
-                Contact preference
-              </p>
-              <p className="text-xs">
-                {contact.join(", ") || "None given"}
-                {seek.preferredWeekDay ? ` · prefers ${seek.preferredWeekDay}` : ""}
-              </p>
-            </section>
-          )}
+          {/* Every field on the record, empties included, so nothing is silently
+              missing — the ticket is the same object both sides are acting on. */}
+          <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border bg-muted/20 p-3 sm:grid-cols-3">
+            <Field label="Ticket" value={`#${seek.id}`} />
+            <Field label="Status" value={seek.closed || "Open"} />
+            <Field label="Category" value={categoryName} />
+            <Field label="Urgency" value={seek.urgency} />
+            <Field label="Raised on" value={formatDate(seek.raisedOn)} />
+            <Field label="Raised at" value={formatTime(seek.raisedAt)} />
+            <Field label="Contact via" value={contact.join(", ")} />
+            <Field label="Preferred day" value={seek.preferredWeekDay} />
+            <Field label="Preferred time" value={formatTime(seek.preferredTime)} />
+            {seeker && <Field label="Seeker" value={seeker.name} />}
+            {seeker && <Field label="Seeker email" value={seeker.email} />}
+            {seeker && <Field label="Seeker location" value={[seeker.city, seeker.country].filter(Boolean).join(", ")} />}
+            <Field label="Phone / WhatsApp" value={seek.callOn} />
+            <Field label="Sent to" value={detail?.to} />
+            <Field label="Outcome" value={seek.outcome} />
+            <Field label="Closed on" value={formatDate(seek.closedAt)} />
+          </section>
 
           <section>
             <div className="mb-1.5 flex items-center gap-1.5">

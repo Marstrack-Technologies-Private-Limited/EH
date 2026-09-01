@@ -42,6 +42,7 @@ import {
   useUsers,
 } from "@/hooks/use-p2p.js";
 import {
+  deleteSeekAttachment,
   getUserByRegNo,
   isImageFile,
   saveSeek,
@@ -201,6 +202,7 @@ export default function SeekAssistance() {
   // original date/time ride along so an edit does not silently re-stamp when
   // the request was raised.
   const [editing, setEditing] = useState(null);
+  const [removingUrl, setRemovingUrl] = useState(null);
 
   // Resolve the offerer named in the query string.
   useEffect(() => {
@@ -415,6 +417,48 @@ export default function SeekAssistance() {
       window.scrollTo({ top: 0, behavior: "smooth" });
     },
     [seekDetails.index, myTopics.data],
+  );
+
+  /**
+   * Try to remove an attachment, and report what actually happened.
+   *
+   * The SP's status code can't be trusted — 1829 answers 201 and removes
+   * nothing — so `deleteSeekAttachment` re-reads the row and tells us whether
+   * it really went. Until the backend fixes 1828/1829 this lands on the
+   * "not available yet" branch, and starts working on its own once they do.
+   */
+  const removeAttachment = useCallback(
+    async (attachment) => {
+      if (!editing) return;
+      if (!window.confirm("Remove this attachment from the ticket?")) return;
+
+      setRemovingUrl(attachment.url);
+      try {
+        const res = await deleteSeekAttachment({
+          seekId: editing.id,
+          url: attachment.url,
+          isImage: attachment.kind === "image",
+        });
+
+        if (res.removed) {
+          toast.success("Attachment removed");
+          seekAttachments.reload();
+        } else {
+          toast.warning("Removing attachments isn't available yet", {
+            description: `The file is still on ticket #${editing.id}. SP ${res.spname} ${
+              res.called
+                ? "reported success but deleted nothing"
+                : "rejected the call"
+            } — this will start working as soon as the backend fixes it.`,
+          });
+        }
+      } catch (err) {
+        toast.error("Could not remove the attachment", { description: err.message });
+      } finally {
+        setRemovingUrl(null);
+      }
+    },
+    [editing, seekAttachments],
   );
 
   const cancelEdit = useCallback(() => {
@@ -869,10 +913,11 @@ export default function SeekAssistance() {
                     </a>
                     <button
                       type="button"
-                      disabled
-                      title="Removing an attachment needs SP 1828, which the backend has not made available yet"
-                      aria-label="Remove attachment (unavailable)"
-                      className="flex size-5 shrink-0 cursor-not-allowed items-center justify-center rounded-full text-muted-foreground/40"
+                      onClick={() => removeAttachment(a)}
+                      disabled={removingUrl === a.url}
+                      title="Remove this attachment"
+                      aria-label={`Remove attachment ${i + 1}`}
+                      className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-40"
                     >
                       <Trash2 className="size-3" />
                     </button>
@@ -880,10 +925,8 @@ export default function SeekAssistance() {
                 ))}
               </ul>
               <p className="mt-1.5 text-[10px] text-muted-foreground">
-                These stay on the ticket. Anything you add below is added to them —
-                files can't be removed or replaced yet, because the backend's delete
-                procedure isn't working (SP 1828 rejects every call, SP 1829 reports
-                success but deletes nothing).
+                Anything you add below is added to these. Removing is wired up but the
+                backend procedure isn't live yet — the bin icon will tell you.
               </p>
             </div>
           )}
@@ -1149,6 +1192,7 @@ export default function SeekAssistance() {
                         .filter(Boolean)
                         .join(", ")}
                       {s.preferredWeekDay ? ` · ${s.preferredWeekDay}` : ""}
+                      {s.preferredTime ? ` at ${toTimeInput(s.preferredTime)}` : ""}
                     </p>
                   )}
                 </li>
@@ -1173,6 +1217,11 @@ export default function SeekAssistance() {
         seek={seeks.data.find((s) => s.id === viewingId) || null}
         detail={parseProblems(seekDetails.index.get(viewingId))}
         attachments={seekAttachments.index.get(viewingId) || []}
+        categoryName={
+          categories.data.find(
+            (c) => c.id === seeks.data.find((s) => s.id === viewingId)?.categoryId,
+          )?.name
+        }
         open={viewingId !== null}
         onOpenChange={(open) => !open && setViewingId(null)}
       />

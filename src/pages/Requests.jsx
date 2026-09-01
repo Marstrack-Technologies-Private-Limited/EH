@@ -59,6 +59,14 @@ function formatWhen(dateValue, timeValue) {
   return `${day}, ${t.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
 }
 
+/** Clock only — the date half of a preferred-contact time carries no meaning. */
+function formatTime(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
 function topicsOf(detailText) {
   return (/Topics:\s*([^|]*)/.exec(detailText || "")?.[1] || "").trim();
 }
@@ -335,7 +343,11 @@ export default function Requests() {
                     </span>
                   )}
                   {!s.byEmail && !s.byWhatsapp && !s.callOn && <span>no preference given</span>}
-                  {s.preferredWeekDay && <span>· prefers {s.preferredWeekDay}</span>}
+                  {(s.preferredWeekDay || s.preferredTime) && (
+                    <span>
+                      · prefers {[s.preferredWeekDay, formatTime(s.preferredTime)].filter(Boolean).join(" ")}
+                    </span>
+                  )}
                 </div>
 
                 {isOpen ? (
@@ -397,9 +409,10 @@ export default function Requests() {
         seek={requests.data.find((s) => s.id === viewingId) || null}
         detail={{ topics: topicsOf(details.index.get(viewingId)) }}
         attachments={attachments.index.get(viewingId) || []}
-        seekerName={seekerById.get(
-          requests.data.find((s) => s.id === viewingId)?.seekerId,
-        )?.name}
+        seeker={seekerById.get(requests.data.find((s) => s.id === viewingId)?.seekerId)}
+        categoryName={categoryName(
+          requests.data.find((s) => s.id === viewingId)?.categoryId,
+        )}
         open={viewingId !== null}
         onOpenChange={(open) => !open && setViewingId(null)}
       />

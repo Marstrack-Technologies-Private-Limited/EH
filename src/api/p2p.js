@@ -843,3 +843,37 @@ export async function listSeeksForCategories({ categoryIds = [], includeClosed =
 
   return { data, totalRecords: data.length };
 }
+
+/**
+ * SP 1828 / 1829 — remove an attachment from a seek.
+ *
+ * **Neither works on the backend today**, so this verifies rather than trusts:
+ *
+ *  - 1828 answers 501 to every parameter set tried (31 shapes swept on
+ *    2026-09-02: both status params, one, none; the document under ten
+ *    different names; with and without the seek id).
+ *  - 1829 answers 201 but removes nothing, because it targets the images table
+ *    while SP 1827 files images into the documents one.
+ *
+ * A 201 therefore proves nothing here. The row is re-read afterwards and
+ * `removed` reports what actually happened, so the UI can tell the truth. When
+ * the backend fixes either SP this starts succeeding with no code change.
+ */
+export async function deleteSeekAttachment({ seekId, url, isImage = false }) {
+  const spname = isImage ? SPS.DELETE_SEEK_IMAGE : SPS.DELETE_SEEK_DOCUMENT;
+  let called = false;
+  let error = null;
+
+  try {
+    await callSp(spname, attachmentParams(seekId, url));
+    called = true;
+  } catch (err) {
+    error = err.message || "The delete procedure rejected the call.";
+  }
+
+  // Read it back: the only trustworthy signal.
+  const { data } = await listSeekAttachments({ seekId });
+  const removed = !data.some((a) => a.url === url);
+
+  return { removed, called, error, spname };
+}
