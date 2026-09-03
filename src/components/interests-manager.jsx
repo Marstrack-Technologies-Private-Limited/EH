@@ -13,7 +13,7 @@ import { CheckList } from "@/components/ui/check-list.jsx";
 import { ProficiencySlider } from "@/components/ui/proficiency-slider.jsx";
 import { useCategories, useTopics, useUserCategories, useUserTopics } from "@/hooks/use-p2p.js";
 import { useProficiency } from "@/hooks/use-proficiency.js";
-import { removeLevel } from "@/lib/proficiency-store.js";
+import { removeLevel, setLevels } from "@/lib/proficiency-store.js";
 import {
   addUserCategory,
   addUserTopic,
@@ -44,15 +44,22 @@ export function InterestsManager({ userId, userType, className }) {
   const myTopics = useUserTopics({ userId });
   const proficiency = useProficiency(userId);
 
-  // Offerers rate what they know; seekers are simply listing interests. The
-  // type is on every row of both views, so the caller need not pass it.
+  // Every topic carries a level — an offerer says how well they can help with
+  // it, a seeker how much they already know. Only the tag after the topic name
+  // differs. The type is on every row of both views, so the caller need not
+  // pass it.
   const resolvedType = (
     userType ||
     myTopics.data[0]?.userType ||
     myAreas.data[0]?.userType ||
     ""
   ).toUpperCase();
-  const rates = resolvedType === "OFFERER" || resolvedType === "ALL";
+  const roleTag =
+    resolvedType === "OFFERER" || resolvedType === "ALL" ? "Offer Guidance" : "Seeking Help";
+
+  // Levels being edited but not yet saved, keyed by topic id. Sliders read
+  // through here so a drag shows immediately; Save writes the lot.
+  const [draft, setDraft] = useState({});
 
   const [busy, setBusy] = useState(false);
   const [addingArea, setAddingArea] = useState(false);
@@ -100,6 +107,23 @@ export function InterestsManager({ userId, userType, className }) {
     reloadTopics();
   }, [reloadAreas, reloadTopics]);
 
+  /** What a topic's slider shows: the unsaved value if there is one. */
+  const levelFor = (topicId) => draft[topicId] ?? proficiency.levelOf(topicId);
+
+  const unsaved = Object.entries(draft).filter(
+    ([topicId, level]) => level !== proficiency.levelOf(topicId),
+  );
+
+  const saveLevels = () => {
+    setLevels(userId, draft);
+    setDraft({});
+    toast.success(
+      unsaved.length === 1
+        ? "Proficiency saved"
+        : `Proficiency saved for ${unsaved.length} topics`,
+    );
+  };
+
   if (!hasId(userId)) {
     return (
       <div className={cn("rounded-lg border border-dashed p-6 text-center", className)}>
@@ -118,14 +142,12 @@ export function InterestsManager({ userId, userType, className }) {
             <Layers className="size-3.5 text-primary" /> Areas of interest
           </p>
           <p className="text-[11px] text-muted-foreground">
-            Add an area, then add topics within it.
-            {rates && " Set how well you know each topic on its slider."}
+            Add an area, then add topics within it, and say how well you know each
+            one.
           </p>
-          {rates && (
-            <p className="text-[10px] text-muted-foreground/80">
-              Proficiency is kept on this device — the server has no field for it yet.
-            </p>
-          )}
+          <p className="text-[10px] text-muted-foreground/80">
+            Proficiency is kept on this device — the server has no field for it yet.
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <Button
@@ -237,9 +259,13 @@ export function InterestsManager({ userId, userType, className }) {
                       <div className="flex items-start justify-between gap-2">
                         <p className="min-w-0 text-[13px] font-medium">
                           <span className="text-muted-foreground">
-                            {area.categoryName || `Category #${area.categoryId}`} ·{" "}
+                            {area.categoryName || `Category #${area.categoryId}`}
                           </span>
+                          <span className="px-1.5 text-primary">•</span>
                           {t.topicName || `#${t.topicId}`}
+                          <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+                            ({roleTag})
+                          </span>
                         </p>
                         <button
                           type="button"
@@ -249,6 +275,7 @@ export function InterestsManager({ userId, userType, className }) {
                               async () => {
                                 await removeUserTopic(userId, t.topicId);
                                 removeLevel(userId, t.topicId);
+                                setDraft(({ [t.topicId]: _dropped, ...rest }) => rest);
                               },
                               `Removed ${t.topicName}`,
                               reloadTopics,
@@ -261,13 +288,11 @@ export function InterestsManager({ userId, userType, className }) {
                           <X className="size-3.5" />
                         </button>
                       </div>
-                      {rates && (
-                        <ProficiencySlider
-                          className="mt-1"
-                          value={proficiency.levelOf(t.topicId)}
-                          onChange={(v) => proficiency.setLevel(t.topicId, v)}
-                        />
-                      )}
+                      <ProficiencySlider
+                        className="mt-1 border-t pt-2"
+                        value={levelFor(t.topicId)}
+                        onChange={(v) => setDraft((d) => ({ ...d, [t.topicId]: v }))}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -279,6 +304,22 @@ export function InterestsManager({ userId, userType, className }) {
             </div>
           );
         })}
+
+      {/* One Save for every slider on the screen — a drag is a draft until it
+          is pressed, so a stray touch while scrolling changes nothing. */}
+      {!loading && !error && myTopics.data.length > 0 && (
+        <div className="sticky bottom-16 z-10 -mx-1 rounded-lg border bg-card/95 p-2 backdrop-blur md:bottom-2">
+          <Button
+            className="h-11 w-full"
+            disabled={unsaved.length === 0}
+            onClick={saveLevels}
+          >
+            {unsaved.length === 0
+              ? "Save"
+              : `Save ${unsaved.length} change${unsaved.length === 1 ? "" : "s"}`}
+          </Button>
+        </div>
+      )}
 
       {addingArea && (
         <AddAreaDialog
