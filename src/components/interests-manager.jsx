@@ -9,7 +9,11 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog.jsx";
+import { CheckList } from "@/components/ui/check-list.jsx";
+import { ProficiencySlider } from "@/components/ui/proficiency-slider.jsx";
 import { useCategories, useTopics, useUserCategories, useUserTopics } from "@/hooks/use-p2p.js";
+import { useProficiency } from "@/hooks/use-proficiency.js";
+import { removeLevel } from "@/lib/proficiency-store.js";
 import {
   addUserCategory,
   addUserTopic,
@@ -35,9 +39,20 @@ function summarise(picked, one, many) {
   return `Added ${picked.length} ${picked.length === 1 ? one : many}`;
 }
 
-export function InterestsManager({ userId, className }) {
+export function InterestsManager({ userId, userType, className }) {
   const myAreas = useUserCategories({ userId });
   const myTopics = useUserTopics({ userId });
+  const proficiency = useProficiency(userId);
+
+  // Offerers rate what they know; seekers are simply listing interests. The
+  // type is on every row of both views, so the caller need not pass it.
+  const resolvedType = (
+    userType ||
+    myTopics.data[0]?.userType ||
+    myAreas.data[0]?.userType ||
+    ""
+  ).toUpperCase();
+  const rates = resolvedType === "OFFERER" || resolvedType === "ALL";
 
   const [busy, setBusy] = useState(false);
   const [addingArea, setAddingArea] = useState(false);
@@ -104,7 +119,13 @@ export function InterestsManager({ userId, className }) {
           </p>
           <p className="text-[11px] text-muted-foreground">
             Add an area, then add topics within it.
+            {rates && " Set how well you know each topic on its slider."}
           </p>
+          {rates && (
+            <p className="text-[10px] text-muted-foreground/80">
+              Proficiency is kept on this device — the server has no field for it yet.
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <Button
@@ -210,32 +231,46 @@ export function InterestsManager({ userId, className }) {
               </div>
 
               {topics.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
+                <ul className="space-y-1.5">
                   {topics.map((t) => (
-                    <span
-                      key={t.topicId}
-                      className="inline-flex items-center gap-1 rounded-full bg-accent py-1 pl-2.5 pr-1 text-[11px] font-medium text-accent-foreground"
-                    >
-                      {t.topicName || `#${t.topicId}`}
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          run(
-                            () => removeUserTopic(userId, t.topicId),
-                            `Removed ${t.topicName}`,
-                            reloadTopics,
-                          )
-                        }
-                        aria-label={`Remove ${t.topicName}`}
-                        title="Remove"
-                        className="ml-0.5 flex size-4 items-center justify-center rounded-full hover:bg-destructive/15 hover:text-destructive cursor-pointer"
-                      >
-                        <X className="size-3" />
-                      </button>
-                    </span>
+                    <li key={t.topicId} className="rounded-lg border bg-background px-3 py-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="min-w-0 text-[13px] font-medium">
+                          <span className="text-muted-foreground">
+                            {area.categoryName || `Category #${area.categoryId}`} ·{" "}
+                          </span>
+                          {t.topicName || `#${t.topicId}`}
+                        </p>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            run(
+                              async () => {
+                                await removeUserTopic(userId, t.topicId);
+                                removeLevel(userId, t.topicId);
+                              },
+                              `Removed ${t.topicName}`,
+                              reloadTopics,
+                            )
+                          }
+                          aria-label={`Remove ${t.topicName}`}
+                          title="Remove"
+                          className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/15 hover:text-destructive cursor-pointer"
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </div>
+                      {rates && (
+                        <ProficiencySlider
+                          className="mt-1"
+                          value={proficiency.levelOf(t.topicId)}
+                          onChange={(v) => proficiency.setLevel(t.topicId, v)}
+                        />
+                      )}
+                    </li>
                   ))}
-                </div>
+                </ul>
               ) : (
                 <p className="text-[11px] text-muted-foreground">
                   No topics picked in this area yet.
@@ -292,9 +327,17 @@ function PickerDialog({ title, subtitle, loading, error, options, emptyText, onP
       return next;
     });
 
-  const allSelected = options.length > 0 && selected.size === options.length;
-  const toggleAll = () =>
-    setSelected(allSelected ? new Set() : new Set(options.map((o) => o.value)));
+  // CheckList hands back the rows it is currently showing (a search may have
+  // narrowed them) plus whether they are all ticked already.
+  const toggleAll = (shown, allSelected) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const o of shown) {
+        if (allSelected) next.delete(o.value);
+        else next.add(o.value);
+      }
+      return next;
+    });
 
   const chosen = options.filter((o) => selected.has(o.value));
 
@@ -321,52 +364,16 @@ function PickerDialog({ title, subtitle, loading, error, options, emptyText, onP
           </div>
         )}
 
-        {!loading && !error && options.length === 0 && (
-          <p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">
-            {emptyText}
-          </p>
-        )}
-
-        {!loading && !error && options.length > 0 && (
-          <>
-            {options.length > 1 && (
-              <label className="flex cursor-pointer items-center gap-2 px-1 text-[11px] font-medium text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={toggleAll}
-                  className="size-4 accent-[var(--primary)]"
-                />
-                Select all ({options.length})
-              </label>
-            )}
-
-            <ul className="max-h-64 space-y-1 overflow-y-auto scrollbar-thin">
-              {options.map((o) => {
-                const on = selected.has(o.value);
-                return (
-                  <li key={o.value}>
-                    <label
-                      className={cn(
-                        "flex w-full cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-[13px] transition-colors",
-                        on
-                          ? "border-primary/50 bg-primary/10"
-                          : "hover:border-primary/40 hover:bg-accent",
-                      )}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={on}
-                        onChange={() => toggle(o.value)}
-                        className="size-4 shrink-0 accent-[var(--primary)]"
-                      />
-                      <span className="truncate">{o.label}</span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-          </>
+        {!loading && !error && (
+          <CheckList
+            options={options}
+            selected={selected}
+            onToggle={toggle}
+            onToggleAll={toggleAll}
+            searchable
+            emptyText={emptyText}
+            listClassName="max-h-64"
+          />
         )}
 
         <DialogFooter className="gap-2">

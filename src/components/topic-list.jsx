@@ -1,7 +1,6 @@
 import { Badge } from "@/components/ui/badge.jsx";
-import { StarRating } from "@/components/ui/star-rating.jsx";
+import { ProficiencyMeter } from "@/components/ui/proficiency-slider.jsx";
 import { categoryIcon } from "@/components/icon-map.js";
-import { proficiencyLabel } from "@/data/categories.js";
 import { useApp } from "@/store/app-store.jsx";
 
 // Renders a user's topics grouped by category. Shows proficiency for offerers.
@@ -40,14 +39,7 @@ export function TopicList({ topics = [], showRating = false, highlightIds = [] }
                     {t.name}
                     {highlight.has(t.topicId) && <Badge variant="offerer">match</Badge>}
                   </span>
-                  {showRating && t.rating != null && (
-                    <span className="inline-flex items-center gap-2">
-                      <span className="hidden text-xs text-muted-foreground sm:inline">
-                        {proficiencyLabel(t.rating)}
-                      </span>
-                      <StarRating value={t.rating} size="sm" />
-                    </span>
-                  )}
+                  {showRating && t.rating != null && <ProficiencyMeter value={t.rating} />}
                 </div>
               ))}
             </div>

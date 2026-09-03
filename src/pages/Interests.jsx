@@ -30,14 +30,17 @@ export default function Interests() {
   const { regNo: ownRegNo, loading: resolving } = useMyRegNo(user);
   const isAdmin = !resolving && !hasId(ownRegNo);
 
-  const [pickedId, setPickedId] = useState(null);
-  const targetId = hasId(ownRegNo) ? ownRegNo : pickedId;
+  const [picked, setPicked] = useState(null);
+  const targetId = hasId(ownRegNo) ? ownRegNo : picked?.id ?? null;
+  // Offerers get a proficiency slider per topic; seekers do not. For an admin
+  // that is the picked member's type, not their own.
+  const targetType = hasId(ownRegNo) ? user?.userType || user?.role : picked?.type;
 
   return (
     <PageContainer>
-      {isAdmin && <MemberPicker value={pickedId} onChange={setPickedId} />}
+      {isAdmin && <MemberPicker value={picked?.id ?? null} onChange={setPicked} />}
 
-      <InterestsManager userId={targetId} />
+      <InterestsManager userId={targetId} userType={targetType} />
     </PageContainer>
   );
 }
@@ -93,7 +96,10 @@ function MemberPicker({ value, onChange }) {
           </Label>
           <Select
             value={hasId(value) ? String(value) : ""}
-            onValueChange={(v) => onChange(Number(v))}
+            onValueChange={(v) => {
+              const u = data.find((x) => String(x.id) === v);
+              onChange(u ? { id: u.id, type: u.type } : null);
+            }}
             disabled={loading}
           >
             <SelectTrigger>

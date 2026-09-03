@@ -89,13 +89,17 @@ export const CATEGORIES = [
   },
 ];
 
+// The five stops on the proficiency slider, in the order they appear under it.
 export const PROFICIENCY = [
-  { value: 1, label: "Beginner" },
-  { value: 2, label: "Novice" },
-  { value: 3, label: "Intermediate" },
+  { value: 1, label: "Novice" },
+  { value: 2, label: "Beginner" },
+  { value: 3, label: "Competent" },
   { value: 4, label: "Proficient" },
   { value: 5, label: "Expert" },
 ];
+
+/** Where a topic starts when it is first picked — the middle of the scale. */
+export const DEFAULT_PROFICIENCY = 3;
 
 export function proficiencyLabel(rating) {
   return PROFICIENCY.find((p) => p.value === Math.round(rating))?.label ?? "—";

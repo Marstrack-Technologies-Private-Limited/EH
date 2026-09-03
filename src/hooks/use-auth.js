@@ -8,6 +8,7 @@ import {
   selectAuth,
 } from "@/store/auth-slice.js";
 import { saveUser, addUserCategory, addUserTopic } from "@/api/p2p.js";
+import { setLevels, setOverall } from "@/lib/proficiency-store.js";
 import { LOGIN_MODE, USER_TYPE } from "@/api/config.js";
 
 let idCounter = 0;
@@ -158,6 +159,21 @@ export function useAuth() {
         } catch (err) {
           interestsError = err.message || "Your interests could not be saved.";
         }
+      }
+
+      // Proficiency has no home on the backend yet — SP 1705 501s on every
+      // extra parameter tried — so an offerer's levels are kept on the device.
+      // See src/lib/proficiency-store.js and PENDING-BACKEND.md § Proficiency.
+      if (saved.id !== null && saved.id !== undefined && data.role === "offerer") {
+        if (data.proficiency) setOverall(saved.id, data.proficiency);
+        setLevels(
+          saved.id,
+          Object.fromEntries(
+            (data.topics || [])
+              .filter((t) => t.rating != null)
+              .map((t) => [t.topicId, t.rating]),
+          ),
+        );
       }
 
       const local = register({ ...data, regNo: saved.id });

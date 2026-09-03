@@ -18,6 +18,8 @@ import { Label } from "@/components/ui/label.jsx";
 import { Textarea } from "@/components/ui/textarea.jsx";
 import { Card } from "@/components/ui/card.jsx";
 import { TopicPicker } from "@/components/topic-picker.jsx";
+import { ProficiencySlider } from "@/components/ui/proficiency-slider.jsx";
+import { DEFAULT_PROFICIENCY, proficiencyLabel } from "@/data/categories.js";
 import { useAuth } from "@/hooks/use-auth.js";
 import { useTaxonomy } from "@/hooks/use-p2p.js";
 import { LocationSelect } from "@/components/location-select.jsx";
@@ -58,6 +60,7 @@ export default function Register() {
     city: "",
     problem: "",
     bio: "",
+    proficiency: DEFAULT_PROFICIENCY,
     topics: [],
   });
 
@@ -260,6 +263,24 @@ export default function Register() {
                 />
               </Field>
 
+              {/* Offerers state their level up front; it seeds every topic they
+                  pick on the next step, which they can then fine-tune. */}
+              {isOfferer && (
+                <div className="space-y-1.5 rounded-xl border bg-muted/30 p-3">
+                  <Label>Your proficiency</Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    How well do you know your subject overall? This sets the starting
+                    level for each topic you pick next — {proficiencyLabel(form.proficiency)}{" "}
+                    for now.
+                  </p>
+                  <ProficiencySlider
+                    label="How well do you know your subject?"
+                    value={form.proficiency}
+                    onChange={(v) => set("proficiency", v)}
+                  />
+                </div>
+              )}
+
               <div className="flex justify-end">
                 <Button size="lg" onClick={next}>
                   Continue <ArrowRight className="size-4" />
@@ -274,8 +295,16 @@ export default function Register() {
                 </h3>
                 <p className="text-sm text-muted-foreground">
                   Pick the categories and topics you{" "}
-                  {isOfferer ? "can help with — and rate your proficiency." : "want help with."}
+                  {isOfferer
+                    ? "can help with, then set how well you know each one."
+                    : "want help with."}
                 </p>
+                {isOfferer && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Proficiency is kept on this device for now — the server has no field
+                    for it yet.
+                  </p>
+                )}
               </div>
 
               {taxonomy.loading ? (
@@ -308,6 +337,7 @@ export default function Register() {
                   value={form.topics}
                   onChange={(t) => set("topics", t)}
                   withRating={isOfferer}
+                  defaultRating={form.proficiency}
                 />
               )}
 

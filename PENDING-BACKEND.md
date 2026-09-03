@@ -3,7 +3,7 @@
 What is **not** implemented in this frontend, and exactly what is needed to
 finish it. Everything else in the app runs on live `devapi.tech23.net` objects.
 
-Last verified against dev: **2026-09-02**.
+Last verified against dev: **2026-09-04**.
 
 ---
 
@@ -213,7 +213,39 @@ saying the checkbox is ignored.
 save and read back. Note the 1701 parameter set changed — the old 12-param body
 now 501s.)*
 
-## 7. Security items to close before any public deploy
+## 7. Proficiency — captured in the UI, nowhere to store it
+
+**Screens:** `/register` (offerer sign-up), `/interests`
+(`src/components/interests-manager.jsx`)
+
+An offerer now states how well they know each topic — the five-stop slider
+Novice / Beginner / Competent / Proficient / Expert — and gives one overall
+level at sign-up. **Nothing on the backend can hold it**, so the level is kept
+in the browser (`src/lib/proficiency-store.js`) and every screen that shows it
+says so on the page. It does not follow the member to another device, and no
+other member can see it.
+
+Probed live 2026-09-04:
+
+| Probe | Result |
+|---|---|
+| Views 1703 / 1704 / 1699 | **No proficiency-like column.** 1704 returns `USERID`, `USERNAME`, `OM_USER_SEEKER_GUIDANCE_ALL`, `AREAOFINTERESTID`, `TOPICNAME`, `CATEGORYNO`, `CATEGORYNAME` and nothing else |
+| SP 1705 + one extra key | **501 on every name tried** — `PROFICIENCY`, `PROFICIENCYLEVEL`, `TOPICPROFICIENCY`, `USERPROFICIENCY`, `RATING`, `KNOWLEDGELEVEL`, `LEVEL`, `EXPERTISE`. The identical body *without* the extra key returns 201, so the 501 is the parameter set, not the call |
+| SPs 1706 / 1707 / 1708 | Registered but undocumented; 501 on every proficiency-shaped parameter set tried, and on an empty body |
+
+### What is needed
+
+| Need | Detail |
+|---|---|
+| `@PROFICIENCY` on SP 1705 | TINYINT/INT 1–5 alongside `USERID` / `TOPICID` / `CREATEDELETE`. A CREATE on a pair that already exists should **update** the level rather than insert a second row — today 1705 does not de-duplicate at all |
+| A proficiency column on view 1704 | So a saved level reads back, and so an offerer's level can show on their card in the directory and on `/offerers` |
+| A decision on the overall level | Sign-up captures one figure for the offerer as a whole, but the user master (SP 1701 / view 1699) has no column for it either. Either add one, or drop that field and keep per-topic only |
+
+Once both land: delete `src/lib/proficiency-store.js` and
+`src/hooks/use-proficiency.js` and read/write the real field. `ProficiencySlider`
+and every screen using it stay exactly as they are.
+
+## 8. Security items to close before any public deploy
 
 Both are consequences of what the API currently offers, not oversights:
 

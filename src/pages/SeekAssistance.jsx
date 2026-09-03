@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button.jsx";
 import { Label } from "@/components/ui/label.jsx";
 import { Textarea } from "@/components/ui/textarea.jsx";
 import { Input } from "@/components/ui/input.jsx";
+import { CheckList } from "@/components/ui/check-list.jsx";
 import {
   Select,
   SelectContent,
@@ -793,30 +794,24 @@ export default function SeekAssistance() {
                   , or send to a whole category instead.
                 </p>
               ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {myTopics.data.map((t) => {
-                    const on = chosen.has(t.topicId);
-                    return (
-                      <button
-                        key={t.topicId}
-                        type="button"
-                        onClick={() => toggleTopic(t.topicId)}
-                        className={cn(
-                          "flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer",
-                          on
-                            ? "bg-primary/15 text-primary"
-                            : "border text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        <span>
-                          {t.topicName}
-                          <span className="ml-1 opacity-60">· {t.categoryName}</span>
-                        </span>
-                        {on && <X className="size-3 shrink-0 opacity-70" />}
-                      </button>
-                    );
-                  })}
-                </div>
+                <CheckList
+                  options={myTopics.data.map((t) => ({
+                    value: t.topicId,
+                    label: t.topicName,
+                    hint: t.categoryName,
+                  }))}
+                  selected={chosen}
+                  onToggle={(id) => toggleTopic(id)}
+                  onToggleAll={(shown, allSelected) =>
+                    setSelectedTopicIds(
+                      allSelected ? new Set() : new Set(shown.map((o) => o.value)),
+                    )
+                  }
+                  searchable
+                  searchPlaceholder="Search your topics…"
+                  selectAllLabel="Tick all my topics"
+                  listClassName="max-h-56"
+                />
               )}
             </div>
           )}
@@ -828,37 +823,22 @@ export default function SeekAssistance() {
               Ticking a category ticks its topics above. Offerers who serve a category
               are the ones who see your request.
             </p>
-            <div className="flex flex-wrap gap-1.5">
-              {selectableCategories.map((c) => {
-                const on = categoryIds.includes(c.id);
-                // An inactive category can't be chosen, but one already on the
-                // ticket still shows — read-only — so an edit doesn't hide it.
-                const readOnly = !c.active;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    aria-pressed={on}
-                    disabled={readOnly}
-                    onClick={() => !readOnly && toggleCategory(c.id)}
-                    title={readOnly ? `${c.name} is no longer an active category` : undefined}
-                    className={cn(
-                      "flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
-                      readOnly
-                        ? "cursor-not-allowed border border-dashed text-muted-foreground/60"
-                        : "cursor-pointer",
-                      on && !readOnly
-                        ? "bg-primary/15 text-primary"
-                        : !readOnly && "border text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {c.name}
-                    {on && !readOnly && <X className="size-3 opacity-70" />}
-                    {readOnly && <span className="text-[9px] uppercase">inactive</span>}
-                  </button>
-                );
-              })}
-            </div>
+            {/* An inactive category can't be chosen, but one already on the
+                ticket still lists — read-only — so an edit doesn't hide it. */}
+            <CheckList
+              options={selectableCategories.map((c) => ({
+                value: c.id,
+                label: c.name,
+                hint: c.active ? undefined : "No longer an active category",
+                disabled: !c.active,
+                disabledReason: `${c.name} is no longer an active category`,
+              }))}
+              selected={new Set(categoryIds)}
+              onToggle={(id) => toggleCategory(id)}
+              searchable
+              searchPlaceholder="Search categories…"
+              listClassName="max-h-56"
+            />
             <p className="text-[10px] text-muted-foreground">
               {editing
                 ? "A ticket is filed under one category — picking another moves this one."
