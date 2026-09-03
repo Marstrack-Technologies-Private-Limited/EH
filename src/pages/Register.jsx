@@ -295,13 +295,16 @@ export default function Register() {
                 </h3>
                 <p className="text-sm text-muted-foreground">
                   Pick the categories and topics you{" "}
-                  {isOfferer ? "can help with" : "want help with"}, then say how well
-                  you know each one.
+                  {isOfferer
+                    ? "can help with, then say how well you know each one."
+                    : "want help with."}
                 </p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Proficiency is kept on this device for now — the server has no field
-                  for it yet.
-                </p>
+                {isOfferer && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Proficiency is kept on this device for now — the server has no field
+                    for it yet.
+                  </p>
+                )}
               </div>
 
               {taxonomy.loading ? (
@@ -333,7 +336,7 @@ export default function Register() {
                   categories={taxonomy.categories}
                   value={form.topics}
                   onChange={(t) => set("topics", t)}
-                  withRating
+                  withRating={isOfferer}
                   defaultRating={form.proficiency}
                 />
               )}

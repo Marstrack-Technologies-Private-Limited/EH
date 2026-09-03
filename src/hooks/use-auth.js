@@ -164,11 +164,8 @@ export function useAuth() {
       // Proficiency has no home on the backend yet — SP 1705 501s on every
       // extra parameter tried — so an offerer's levels are kept on the device.
       // See src/lib/proficiency-store.js and PENDING-BACKEND.md § Proficiency.
-      if (saved.id !== null && saved.id !== undefined) {
-        // The overall figure is only asked of offerers.
-        if (data.proficiency && data.role === "offerer") {
-          setOverall(saved.id, data.proficiency);
-        }
+      if (saved.id !== null && saved.id !== undefined && data.role === "offerer") {
+        if (data.proficiency) setOverall(saved.id, data.proficiency);
         setLevels(
           saved.id,
           Object.fromEntries(
