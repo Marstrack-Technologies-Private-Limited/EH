@@ -14,11 +14,42 @@ export function ProficiencySlider({
   onChange,
   label = "How well do you know the topic?",
   disabled = false,
+  compact = false,
   className,
   id,
 }) {
   const level = Math.min(5, Math.max(1, Math.round(Number(value) || DEFAULT_PROFICIENCY)));
   const set = (v) => !disabled && onChange?.(v);
+
+  // Compact: two short lines instead of three tall ones. Dropping the tappable
+  // label row is what saves the height, so the level name moves onto the same
+  // line as the question and the track carries the tick marks.
+  if (compact) {
+    return (
+      <div className={cn("space-y-1", className)}>
+        <div className="flex items-baseline justify-between gap-2">
+          {label && (
+            <span className="truncate text-[11px] text-muted-foreground">{label}</span>
+          )}
+          <span className="shrink-0 text-[11px] font-semibold text-primary">
+            {proficiencyLabel(level)}
+          </span>
+        </div>
+        <Slider
+          id={id}
+          min={1}
+          max={5}
+          step={1}
+          value={[level]}
+          disabled={disabled}
+          onValueChange={([v]) => set(v)}
+          aria-label={label || "Proficiency"}
+          aria-valuetext={proficiencyLabel(level)}
+          className="py-1.5"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className={cn("space-y-2", className)}>

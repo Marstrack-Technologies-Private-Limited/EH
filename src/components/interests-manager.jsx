@@ -292,7 +292,9 @@ export function InterestsManager({ userId, userType, className }) {
                       </div>
                       {rates && (
                         <ProficiencySlider
-                          className="mt-1 border-t pt-2"
+                          compact
+                          label="How well do you know it?"
+                          className="mt-1.5 border-t pt-1.5"
                           value={levelFor(t.topicId)}
                           onChange={(v) => setDraft((d) => ({ ...d, [t.topicId]: v }))}
                         />

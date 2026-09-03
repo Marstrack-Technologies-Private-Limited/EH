@@ -149,6 +149,8 @@ export function TopicPicker({
                   </div>
                   {withRating && (
                     <ProficiencySlider
+                      compact
+                      label="How well do you know it?"
                       className="mt-1"
                       value={v.rating ?? defaultRating}
                       onChange={(r) => setRating(v.topicId, r)}
