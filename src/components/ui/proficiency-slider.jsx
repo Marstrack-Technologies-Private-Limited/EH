@@ -21,20 +21,14 @@ export function ProficiencySlider({
   const level = Math.min(5, Math.max(1, Math.round(Number(value) || DEFAULT_PROFICIENCY)));
   const set = (v) => !disabled && onChange?.(v);
 
-  // Compact: two short lines instead of three tall ones. Dropping the tappable
-  // label row is what saves the height, so the level name moves onto the same
-  // line as the question and the track carries the tick marks.
+  // Compact: the same three parts, but the stops sit under the track as plain
+  // small labels rather than 44px buttons. A level name parked on the far right
+  // reads as unrelated to the handle; under the track it is the scale itself,
+  // and the one in force is the coloured one.
   if (compact) {
     return (
-      <div className={cn("space-y-1", className)}>
-        <div className="flex items-baseline justify-between gap-2">
-          {label && (
-            <span className="truncate text-[11px] text-muted-foreground">{label}</span>
-          )}
-          <span className="shrink-0 text-[11px] font-semibold text-primary">
-            {proficiencyLabel(level)}
-          </span>
-        </div>
+      <div className={cn("space-y-0.5", className)}>
+        {label && <span className="text-[11px] text-muted-foreground">{label}</span>}
         <Slider
           id={id}
           min={1}
@@ -47,6 +41,27 @@ export function ProficiencySlider({
           aria-valuetext={proficiencyLabel(level)}
           className="py-1.5"
         />
+        <div className="grid grid-cols-5 gap-0.5">
+          {PROFICIENCY.map((p) => {
+            const on = p.value === level;
+            return (
+              <button
+                key={p.value}
+                type="button"
+                disabled={disabled}
+                onClick={() => set(p.value)}
+                aria-pressed={on}
+                className={cn(
+                  "rounded px-0.5 py-0.5 text-center text-[10px] leading-tight transition-colors",
+                  disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-accent",
+                  on ? "font-semibold text-primary" : "text-muted-foreground",
+                )}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
     );
   }
