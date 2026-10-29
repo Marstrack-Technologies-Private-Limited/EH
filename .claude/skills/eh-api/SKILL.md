@@ -14,6 +14,15 @@ Base URL: `https://devapi.tech23.net`
    write the code. The spec sheet has already been wrong twice (see 1701 and
    `OM_USER_SEEKER_GUIDANCE_ALL` below).
 2. **Mobile-first, always.** See [Mobile-first is mandatory](#mobile-first-is-mandatory).
+3. **Never write test data through an SP.** Dev is the database the client and
+   CEO demo from — test rows show up in the app. "Hit it live" means READS
+   (views). For an SP, check only the parameter shape with a call that is
+   rejected and writes nothing; a real save needs the user's OK first, realistic
+   content, and a restore afterwards. Never store "test", "probe", "API", "dev"
+   or "Claude" in any field. (User, 2026-10-30, after probe rows reached the
+   clone app.)
+4. **No object IDs in the UI.** View/SP numbers and developer notes ("see
+   PENDING-BACKEND.md") never appear in app text — only inside error messages.
 
 ## Tokens
 

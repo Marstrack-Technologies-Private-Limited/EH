@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertCircle, ArrowLeft, Calendar, Inbox, MapPin } from "lucide-react";
+import { AlertCircle, ArrowLeft, Calendar, Inbox, MapPin, Send } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog.jsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.jsx";
 import { Button } from "@/components/ui/button.jsx";
 import { UserAvatar } from "@/components/user-avatar.jsx";
@@ -99,6 +106,7 @@ export default function MemberProfile() {
   }, [topics.data]);
 
   const role = member?.type === "OFFERER" ? "offerer" : "seeker";
+  const [requestsOpen, setRequestsOpen] = useState(false);
 
   return (
     <PageContainer className="space-y-3 md:space-y-4">
@@ -233,49 +241,67 @@ export default function MemberProfile() {
               </CardContent>
             </Card>
 
-            {isOffererViewer && hasId(myRegNo) && (
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm md:text-base">
-                    Their open requests for what you offer
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {requests.loading ? (
-                    <div className="shimmer h-12 rounded-lg" />
-                  ) : theirRequests.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      No open requests from this seeker for what you offer.
-                    </p>
-                  ) : (
-                    theirRequests.map((s) => {
-                      const t = topicsOf(requests.details.get(s.id));
-                      return (
-                        <div key={s.id} className="rounded-lg border p-2.5">
-                          <p className="text-xs font-medium">
-                            {categoryName(s.categoryId)}
-                            {t && <span className="text-muted-foreground"> · {t}</span>}
-                          </p>
-                          {s.narration && (
-                            <p className="mt-1 line-clamp-3 text-[11px] text-muted-foreground">
-                              {s.narration}
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                  <Button size="sm" variant="outline" className="h-8" asChild>
-                    <Link to="/requests">
-                      <Inbox className="size-3.5" /> Open Seeker Requests
-                    </Link>
-                  </Button>
-                </CardContent>
-              </Card>
+            {/* Offerer viewing a seeker: their requests, but ONLY those for what
+                this offerer serves (same rule as Seeker Requests). */}
+            {isOffererViewer && hasId(myRegNo) && role === "seeker" && (
+              <Button
+                size="lg"
+                className="h-12 w-full"
+                disabled={requests.loading}
+                onClick={() => setRequestsOpen(true)}
+              >
+                <Inbox className="size-4" />
+                {requests.loading
+                  ? "Loading requests…"
+                  : `See their requests for your services (${theirRequests.length})`}
+              </Button>
             )}
           </div>
         </div>
       )}
+      <Dialog open={requestsOpen} onOpenChange={setRequestsOpen}>
+        <DialogContent className="max-h-[85vh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{member?.name || "This seeker"}'s requests</DialogTitle>
+            <DialogDescription>
+              Only open requests for the services you offer.
+            </DialogDescription>
+          </DialogHeader>
+          {theirRequests.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No open requests from this seeker for what you offer.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {theirRequests.map((s) => {
+                const t = topicsOf(requests.details.get(s.id));
+                return (
+                  <li key={s.id} className="rounded-lg border p-3">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono text-[11px] font-semibold">#{s.id}</span>
+                      <span className="text-xs font-medium">{categoryName(s.categoryId)}</span>
+                      {s.raisedOn && (
+                        <span className="ml-auto text-[10px] text-muted-foreground">
+                          {s.raisedOn.toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                    {t && <p className="mt-1 text-[11px] text-muted-foreground">Topics: {t}</p>}
+                    {s.narration && (
+                      <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-xs">{s.narration}</p>
+                    )}
+                    <Button size="sm" className="mt-2 h-11 md:h-8" asChild>
+                      <Link to={`/requests?seek=${s.id}`}>
+                        <Send className="size-3.5" /> View &amp; respond
+                      </Link>
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </DialogContent>
+      </Dialog>
     </PageContainer>
   );
 }

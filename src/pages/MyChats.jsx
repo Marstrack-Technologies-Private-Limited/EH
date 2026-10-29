@@ -306,9 +306,7 @@ export default function MyChats() {
       <div className="mt-4 flex items-start gap-2 rounded-lg border border-dashed p-3">
         <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <p className="text-[11px] text-muted-foreground">
-          This screen runs on placeholder data — there are no backend objects for
-          tickets, threads, messages, presence or email notifications yet. Replies you
-          type stay in the page and are not saved. See PENDING-BACKEND.md.
+          Chat is a preview for now — messages you type here are not saved yet.
         </p>
       </div>
     </PageContainer>

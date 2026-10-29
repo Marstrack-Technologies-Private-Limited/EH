@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Inbox,
@@ -16,8 +16,23 @@ import {
   UserRound,
   Check,
   X,
+  SlidersHorizontal,
 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select.jsx";
 import { Button } from "@/components/ui/button.jsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog.jsx";
 import { Input } from "@/components/ui/input.jsx";
 import { Label } from "@/components/ui/label.jsx";
 import { Textarea } from "@/components/ui/textarea.jsx";
@@ -88,6 +103,20 @@ export default function Requests() {
   const seekers = useUsers();
 
   const [query, setQuery] = useState("");
+  // Filters (client, 2026-10-30). "all" = no filter on that field.
+  const [sort, setSort] = useState("newest");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  // Mobile: the filters live in a popup so they don't fill half the screen.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // ?seek=<id> — opened from a seeker's profile to jump to one request.
+  const [params, setParams] = useSearchParams();
+  const focusId = Number(params.get("seek")) || null;
+  const clearFocus = () => {
+    const next = new URLSearchParams(params);
+    next.delete("seek");
+    setParams(next, { replace: true });
+  };
   const [openId, setOpenId] = useState(null);
   const [viewingId, setViewingId] = useState(null);
   const [replies, setReplies] = useState({});
@@ -112,24 +141,57 @@ export default function Requests() {
     [requests.categories],
   );
 
+
+
+  /** When the request was raised, for sorting; falls back to the ticket number. */
+  const raisedTime = (r) => (r.raisedAt || r.raisedOn)?.getTime?.() || 0;
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return requests.data
-      .filter((s) => {
-        if (!q) return true;
-        const seeker = seekerById.get(s.seekerId);
-        return [
-          String(s.id),
-          s.narration,
-          seeker?.name,
-          seeker?.city,
-          topicsOf(requests.details.get(s.id)),
-        ]
-          .filter(Boolean)
-          .some((v) => String(v).toLowerCase().includes(q));
-      })
-      .sort((a, b) => b.id - a.id);
-  }, [requests.data, query, seekerById, requests.details]);
+    const list = requests.data.filter((s) => {
+      if (focusId) return s.id === focusId;
+      if (categoryFilter !== "all" && s.categoryId !== Number(categoryFilter)) return false;
+      if (statusFilter !== "all") {
+        const mine = myResponse(s.id);
+        if (statusFilter === "new" && mine) return false;
+        if (statusFilter === "accepted" && mine?.decision !== RESPONSE_DECISION.ACCEPT) return false;
+        if (statusFilter === "declined" && mine?.decision !== RESPONSE_DECISION.REJECT) return false;
+      }
+      if (!q) return true;
+      const seeker = seekerById.get(s.seekerId);
+      return [
+        String(s.id),
+        s.narration,
+        seeker?.name,
+        seeker?.city,
+        topicsOf(requests.details.get(s.id)),
+      ]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q));
+    });
+    const dir = sort === "oldest" ? 1 : -1;
+    return list.sort((a, b) => dir * (raisedTime(a) - raisedTime(b) || a.id - b.id));
+  }, [
+    requests.data,
+    requests.details,
+    query,
+    seekerById,
+    focusId,
+    categoryFilter,
+    statusFilter,
+    sort,
+    myResponse,
+  ]);
+
+  const activeFilterCount =
+    Number(categoryFilter !== "all") + Number(statusFilter !== "all");
+  const filtersOn = activeFilterCount > 0 || sort !== "newest";
+  const resetFilters = () => {
+    setSort("newest");
+    setCategoryFilter("all");
+    setStatusFilter("all");
+    setQuery("");
+  };
 
   const reloadResponses = responses.reload;
   const sendResponse = useCallback(
@@ -206,38 +268,109 @@ export default function Requests() {
 
       {/* What this offerer offers — the answer to "why am I seeing this?" */}
       {requests.categories.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+        <div className="mb-3">
+          <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
             You offer
-          </span>
-          {requests.categories.map((c) => {
-            const topicNames = [
-              ...(requests.scope.topicsByCategory.get(c.categoryId)?.values() || []),
-            ];
-            return (
-              <span
-                key={c.categoryId}
-                className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary"
-              >
-                {c.categoryName}
-                {topicNames.length ? `: ${topicNames.join(", ")}` : " (all topics)"}
-              </span>
-            );
-          })}
+          </p>
+          {/* One line, swipe/scroll sideways — never wraps into a tall block. */}
+          <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
+            {requests.categories.map((c) => {
+              const topicNames = [
+                ...(requests.scope.topicsByCategory.get(c.categoryId)?.values() || []),
+              ];
+              return (
+                <span
+                  key={c.categoryId}
+                  className="shrink-0 whitespace-nowrap rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary"
+                >
+                  {c.categoryName}
+                  {topicNames.length ? `: ${topicNames.join(", ")}` : " (all topics)"}
+                </span>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      <div className="mb-3">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="h-9 pl-8"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by ticket, seeker, topic or text…"
-          />
+      {focusId ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2.5">
+          <p className="text-xs text-primary">
+            Showing request <span className="font-mono font-semibold">#{focusId}</span> only.
+          </p>
+          <Button size="sm" variant="ghost" className="ml-auto h-11 md:h-8" onClick={clearFocus}>
+            Show all requests
+          </Button>
         </div>
-      </div>
+      ) : (
+        <div className="mb-3 space-y-2">
+          <div className="flex gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="h-11 pl-8 text-base md:h-9 md:text-sm"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search seeker, topic or text…"
+              />
+            </div>
+            <Button
+              type="button"
+              variant={filtersOn ? "default" : "outline"}
+              className="h-11 shrink-0 md:hidden"
+              onClick={() => setFiltersOpen(true)}
+              aria-label="Filters"
+            >
+              <SlidersHorizontal className="size-4" />
+              Filters
+              {activeFilterCount > 0 && ` (${activeFilterCount})`}
+            </Button>
+          </div>
+          <div className="hidden gap-2 md:grid md:grid-cols-3">
+            <Select value={sort} onValueChange={setSort}>
+              <SelectTrigger className="h-11 md:h-9" aria-label="Sort">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="newest">Newest first</SelectItem>
+                <SelectItem value="oldest">Oldest first</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-11 md:h-9" aria-label="Your response">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any response</SelectItem>
+                <SelectItem value="new">Not answered yet</SelectItem>
+                <SelectItem value="accepted">I accepted</SelectItem>
+                <SelectItem value="declined">I declined</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="h-11 md:h-9" aria-label="Category">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All categories</SelectItem>
+                {requests.categories.map((c) => (
+                  <SelectItem key={c.categoryId} value={String(c.categoryId)}>
+                    {c.categoryName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {(filtersOn || query) && (
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <SlidersHorizontal className="size-3.5" />
+              {rows.length} of {requests.data.length} shown
+              <Button size="sm" variant="ghost" className="ml-auto h-11 md:h-7" onClick={resetFilters}>
+                Clear filters
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       {requests.loading ? (
         <div className="space-y-2">
@@ -261,7 +394,7 @@ export default function Requests() {
           <p className="text-[11px] text-muted-foreground">
             {requests.data.length === 0
               ? "No open requests for what you offer right now."
-              : "No request matches this search."}
+              : "No request matches these filters."}
           </p>
         </div>
       ) : (
@@ -349,21 +482,41 @@ export default function Requests() {
                   )}
                 </div>
 
+                {/* Answered: one clear, final status — no second response. */}
                 {myResponse(s.id) && (
-                  <p
+                  <div
                     className={
-                      "mt-2 rounded-md px-2 py-1 text-[11px] font-medium " +
+                      "mt-2 flex items-start gap-2 rounded-md px-2.5 py-2 text-[11px] " +
                       (myResponse(s.id).decision === RESPONSE_DECISION.ACCEPT
                         ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
                         : "bg-muted text-muted-foreground")
                     }
                   >
-                    You {myResponse(s.id).decision === RESPONSE_DECISION.ACCEPT ? "accepted" : "declined"}{" "}
-                    this request
-                  </p>
+                    {myResponse(s.id).decision === RESPONSE_DECISION.ACCEPT ? (
+                      <Check className="mt-0.5 size-3.5 shrink-0" />
+                    ) : (
+                      <X className="mt-0.5 size-3.5 shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-semibold">
+                        You {myResponse(s.id).decision === RESPONSE_DECISION.ACCEPT ? "accepted" : "declined"}{" "}
+                        this request
+                        {myResponse(s.id).respondedAt &&
+                          ` on ${myResponse(s.id).respondedAt.toLocaleDateString(undefined, {
+                            day: "numeric",
+                            month: "short",
+                          })}`}
+                      </p>
+                      {myResponse(s.id).narration && (
+                        <p className="mt-0.5 line-clamp-2 opacity-90">
+                          “{myResponse(s.id).narration}”
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 )}
 
-                {isOpen ? (
+                {isOpen && !myResponse(s.id) ? (
                   <div className="mt-2 space-y-1.5">
                     <div className="grid grid-cols-2 gap-1.5">
                       {[
@@ -421,13 +574,16 @@ export default function Requests() {
                   // Labelled actions — a bare eye icon left offerers guessing
                   // what it opened (client, 2026-10-27).
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    <Button
-                      size="sm"
-                      className="h-11 md:h-8"
-                      onClick={() => setOpenId(s.id)}
-                    >
-                      <Send className="size-3.5" /> {myResponse(s.id) ? "Respond again" : "Respond"}
-                    </Button>
+                    {/* Once answered, the decision is final — no "respond again". */}
+                    {!myResponse(s.id) && (
+                      <Button
+                        size="sm"
+                        className="h-11 md:h-8"
+                        onClick={() => setOpenId(s.id)}
+                      >
+                        <Send className="size-3.5" /> Respond
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="outline"
@@ -452,16 +608,66 @@ export default function Requests() {
       <div className="mt-3 flex items-start gap-2 rounded-lg border border-dashed p-3">
         <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <p className="text-[11px] text-muted-foreground">
-          The list is live: what you offer from views 1703 + 1704, open requests from
-          view 1818, their topics from 1820 and attachments from 1824/1825. A request
-          shows here only if it names a topic you offer, is open to a whole category
-          you serve, or was sent to you. Responses save on SP 1905 and the seeker is
-          emailed by the system; what you already answered is read back from view 1903.
-          Open/closed
-          currently treats an empty status as open, because SP 1821 has no parameter for
-          it and no seek has been closed yet.
+          You see a request only if it asks for a service you offer, covers a whole
+          category you serve, or was sent to you. When you respond, the seeker is
+          emailed.
         </p>
       </div>
+
+      <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Filter requests</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Select value={sort} onValueChange={setSort}>
+              <SelectTrigger className="h-11 w-full" aria-label="Sort">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="newest">Newest first</SelectItem>
+                <SelectItem value="oldest">Oldest first</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-11 w-full" aria-label="Your response">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any response</SelectItem>
+                <SelectItem value="new">Not answered yet</SelectItem>
+                <SelectItem value="accepted">I accepted</SelectItem>
+                <SelectItem value="declined">I declined</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="h-11 w-full" aria-label="Category">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All categories</SelectItem>
+                {requests.categories.map((c) => (
+                  <SelectItem key={c.categoryId} value={String(c.categoryId)}>
+                    {c.categoryName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="ghost"
+              className="h-11"
+              onClick={resetFilters}
+            >
+              Clear
+            </Button>
+            <Button className="h-11" onClick={() => setFiltersOpen(false)}>
+              Show {rows.length} request{rows.length === 1 ? "" : "s"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <SeekViewerDialog
         seek={requests.data.find((s) => s.id === viewingId) || null}

@@ -976,8 +976,7 @@ export default function SeekAssistance() {
                 ))}
               </ul>
               <p className="mt-1.5 text-[10px] text-muted-foreground">
-                Anything you add below is added to these. Removing is wired up but the
-                backend procedure isn't live yet — the bin icon will tell you.
+                Anything you add below is added to these.
               </p>
             </div>
           )}
@@ -1274,16 +1273,6 @@ export default function SeekAssistance() {
         </section>
         </TabsContent>
       </Tabs>
-
-      <div className="mt-3 flex items-start gap-2 rounded-lg border border-dashed p-3">
-        <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-        <p className="text-[11px] text-muted-foreground">
-          Everything here saves live: the header on SP 1821, your topics and chosen
-          offerer on SP 1822, and each file on SP 1826 or 1827 after uploading to the
-          file service. Attachments are add-only for now — neither delete procedure
-          works yet. See PENDING-BACKEND.md.
-        </p>
-      </div>
 
       <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
         <DialogContent className="w-[calc(100%-2rem)] sm:max-w-lg">

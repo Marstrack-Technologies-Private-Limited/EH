@@ -40,7 +40,6 @@ export default function Reviews() {
     [ratings.data],
   );
   const avg = averageStars(rows);
-  const starsMissing = rows.length > 0 && rows.every((r) => r.stars == null);
   const dist = [5, 4, 3, 2, 1].map((n) => ({
     n,
     count: rows.filter((r) => r.stars === n).length,
@@ -98,16 +97,6 @@ export default function Reviews() {
             </CardContent>
           </Card>
 
-          {starsMissing && (
-            <div className="mb-3 flex items-start gap-2 rounded-lg border border-dashed p-3">
-              <AlertCircle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <p className="text-[11px] text-muted-foreground">
-                Star values are saved but view 1906 doesn't return them yet, so only the
-                review text is shown.
-              </p>
-            </div>
-          )}
-
           <div className="space-y-2">
             {rows.map((r, i) => (
               <Card key={`${r.seekerId}-${r.ratedAt?.getTime() || i}`}>
@@ -141,8 +130,7 @@ export default function Reviews() {
       <div className="mt-3 flex items-start gap-2 rounded-lg border border-dashed p-3">
         <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <p className="text-[11px] text-muted-foreground">
-          Live from view 1906. Seekers can rate only after the work on their request is
-          complete.
+          Seekers can rate you only after the work on their request is complete.
         </p>
       </div>
     </PageContainer>
