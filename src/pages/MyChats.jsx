@@ -20,7 +20,9 @@ const day = (iso) =>
   new Date(iso).toLocaleDateString([], { day: "numeric", month: "short" });
 
 /**
- * My Chats — the replies a seeker's enquiry attracted.
+ * Messages (seeker) — the replies a seeker's enquiry attracted. This is the
+ * seeker's ONE conversation area: /chat renders it for seekers and /my-chats
+ * redirects here (client feedback 2026-10-15).
  *
  * One ticket sits at the top; every offerer who responded gets their own thread
  * against that same ticket, and the seeker can talk to all of them separately.
@@ -70,6 +72,13 @@ export default function MyChats() {
 
   return (
     <PageContainer>
+      <div className="mb-3">
+        <h1 className="text-lg font-bold tracking-tight md:text-2xl">Messages</h1>
+        <p className="text-xs text-muted-foreground md:text-sm">
+          Conversations with offerers, grouped by the request they replied to.
+        </p>
+      </div>
+
       {/* Ticket picker — the enquiry being discussed */}
       <div className="-mx-3 mb-3 overflow-x-auto px-3 md:mx-0 md:px-0">
         <div className="flex w-max items-center gap-0.5 rounded-lg bg-muted p-1">

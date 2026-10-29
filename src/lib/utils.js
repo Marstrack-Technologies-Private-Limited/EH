@@ -39,3 +39,16 @@ export function timeAgo(ts) {
   if (days < 7) return `${days}d ago`;
   return new Date(ts).toLocaleDateString();
 }
+
+/**
+ * A loaded Date as yyyy-mm-dd for a date input; "" for none or the SQL epoch
+ * (an empty DATETIME is stored as 1900-01-01).
+ *
+ * Never `String(date).slice(0, 10)`: that yields "Mon May 05", which re-saves
+ * as the year 2001.
+ */
+export function toYmd(d) {
+  if (!(d instanceof Date) || Number.isNaN(d.getTime()) || d.getFullYear() <= 1900) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}

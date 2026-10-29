@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { MapPin, Pencil, Calendar, Mail, AlertCircle } from "lucide-react";
+import { Link } from "react-router-dom";
+import { MapPin, Pencil, Calendar, Mail, AlertCircle, ShieldCheck } from "lucide-react";
 import PageHeader from "@/components/layout/page-header.jsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.jsx";
 import { Button } from "@/components/ui/button.jsx";
@@ -11,6 +12,7 @@ import { useAuth } from "@/hooks/use-auth.js";
 import { getUserByRegNo } from "@/api/p2p.js";
 import { useMyRegNo } from "@/hooks/use-p2p.js";
 import { hasId } from "@/lib/utils.js";
+import { PRIVACY_OPTIONS } from "@/api/config.js";
 import PageContainer from "@/components/layout/page-container.jsx";
 
 export default function Profile() {
@@ -83,7 +85,11 @@ export default function Profile() {
         <div className="space-y-4 md:col-span-1">
           <Card>
             <CardContent className="flex flex-col items-center p-6 text-center">
-              <UserAvatar user={user} className="size-20" showStatus />
+              <UserAvatar
+                user={{ ...user, name: shown.displayName || shown.name, avatar: record?.avatar }}
+                className="size-20"
+                showStatus
+              />
 
               {loading ? (
                 <>
@@ -92,9 +98,19 @@ export default function Profile() {
                 </>
               ) : (
                 <>
-                  <h2 className="mt-3 text-lg font-bold">{shown.name}</h2>
-                  <div className="mt-1.5">
+                  <h2 className="mt-3 text-lg font-bold">{shown.displayName || shown.name}</h2>
+                  {shown.displayName && shown.displayName !== shown.name && (
+                    <p className="text-xs text-muted-foreground">{shown.name}</p>
+                  )}
+                  <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5">
                     <RoleBadge role={isOfferer ? "offerer" : user.role} />
+                    {record?.privacyLevel && (
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        {record.privacyLevel} ·{" "}
+                        {PRIVACY_OPTIONS.find((o) => o.value === record.privacyLevel)?.title ||
+                          "Custom"}
+                      </span>
+                    )}
                   </div>
                   {shown.email && (
                     <p className="mt-3 inline-flex items-center gap-1.5 break-all text-xs text-muted-foreground">
@@ -115,6 +131,32 @@ export default function Profile() {
                   )}
                 </>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Visibility summary (client feedback, 2026-10-06). The full chart
+              lives on /how-it-works; rows in src/data/visibility.js. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ShieldCheck className="size-4 text-primary" /> Who can see your details
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-xs text-muted-foreground">
+              <p>
+                <span className="font-semibold text-foreground">Other members:</span> your
+                name, city, bio and topics.
+              </p>
+              <p>
+                <span className="font-semibold text-foreground">Only you and the EH team:</span>{" "}
+                your email and date of birth.
+              </p>
+              <Link
+                to="/how-it-works#privacy"
+                className="inline-flex min-h-11 items-center font-semibold text-primary hover:underline md:min-h-0"
+              >
+                See the full chart
+              </Link>
             </CardContent>
           </Card>
         </div>

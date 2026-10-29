@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Eye, EyeOff, Lock, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, Lock, AlertCircle, Camera, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button.jsx";
 import { Input } from "@/components/ui/input.jsx";
 import { Label } from "@/components/ui/label.jsx";
@@ -13,7 +13,15 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog.jsx";
 import { LocationSelect } from "@/components/location-select.jsx";
+import { UserAvatar } from "@/components/user-avatar.jsx";
 import { getUserByRegNo, saveUser, verifyUserPassword } from "@/api/p2p.js";
+import { uploadFile } from "@/api/http.js";
+import { PRIVACY_LEVEL } from "@/api/config.js";
+import { PrivacyLevelPicker } from "@/components/privacy-level-picker.jsx";
+import { toYmd } from "@/lib/utils.js";
+
+/** Profile photos only — a few MB is plenty for an avatar. */
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 /**
  * Lets a seeker or offerer edit their OWN record, and nobody else's.
@@ -27,6 +35,11 @@ import { getUserByRegNo, saveUser, verifyUserPassword } from "@/api/p2p.js";
  * SP 1701 rewrites every column on save, so the current row is loaded first and
  * untouched fields are sent back as they are — otherwise saving the name would
  * blank the date of birth.
+ *
+ * Display name and photo (added to SP 1701 on 2026-10-30) are edited here. The
+ * photo uploads to the platform file service as soon as it is picked and its
+ * URL is saved with the rest of the form. Privacy level and the verified flags
+ * are carried over untouched by `saveUser`.
  */
 export function MemberProfileEditor({ open, onOpenChange, regNo, onSaved }) {
   const [form, setForm] = useState(null);
@@ -37,6 +50,8 @@ export function MemberProfileEditor({ open, onOpenChange, regNo, onSaved }) {
   // Password change is opt-in and needs the current password to go through.
   const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
   const [showPw, setShowPw] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const photoInput = useRef(null);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -58,16 +73,18 @@ export function MemberProfileEditor({ open, onOpenChange, regNo, onSaved }) {
         setForm({
           regNo: row.id,
           name: row.name,
+          displayName: row.displayName,
+          photo: row.photo,
+          // Members registered before the option existed default to Balanced.
+          privacyLevel: row.privacyLevel || PRIVACY_LEVEL.B,
           email: row.email,
           password: row.raw?.OM_USER_PASSWORD || "",
           userType: row.type,
           country: row.country,
           city: row.city,
           personalInformation: row.info,
-          dob: row.dob ? String(row.dob).slice(0, 10) : "",
-          registrationDate: row.registeredAt
-            ? String(row.registeredAt).slice(0, 10)
-            : "",
+          dob: toYmd(row.dob),
+          registrationDate: toYmd(row.registeredAt),
           active: row.active,
         });
       })
@@ -83,12 +100,36 @@ export function MemberProfileEditor({ open, onOpenChange, regNo, onSaved }) {
     };
   }, [open, regNo]);
 
+  const pickPhoto = useCallback(async (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Choose an image file", { description: `${file.name} isn't an image.` });
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      toast.error("Photo too large", { description: "Pick an image under 5 MB." });
+      return;
+    }
+    setUploading(true);
+    try {
+      const url = await uploadFile(file);
+      setForm((f) => ({ ...f, photo: url }));
+      toast.success("Photo uploaded", { description: "Save changes to keep it." });
+    } catch (err) {
+      toast.error("Photo not uploaded", { description: err.message });
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
   const submit = useCallback(async () => {
+    const isPrivate = form.privacyLevel === PRIVACY_LEVEL.A;
     const missing = [
       [!form.name.trim(), "Name"],
-      [!form.country, "Country"],
-      [!form.city, "City"],
-      [!form.dob, "Date of birth"],
+      [!(form.displayName || "").trim(), "Display name"],
+      [!isPrivate && !form.country, "Country"],
+      [!isPrivate && !form.city, "City"],
+      [!isPrivate && !form.dob, "Date of birth"],
     ]
       .filter(([bad]) => bad)
       .map(([, label]) => label);
@@ -138,7 +179,14 @@ export function MemberProfileEditor({ open, onOpenChange, regNo, onSaved }) {
     try {
       // regNo comes from the loaded row, and email is never edited, so this can
       // only ever update the signed-in member.
-      await saveUser({ ...form, name: form.name.trim(), password });
+      await saveUser({
+        ...form,
+        name: form.name.trim(),
+        displayName: (form.displayName || "").trim(),
+        // Maximum privacy keeps no photo.
+        photo: isPrivate ? "" : form.photo,
+        password,
+      });
       toast.success(
         wantsNewPassword ? "Profile and password updated" : "Profile updated",
       );
@@ -182,11 +230,82 @@ export function MemberProfileEditor({ open, onOpenChange, regNo, onSaved }) {
             className="space-y-3"
           >
             <div className="space-y-1">
+              <Label>Privacy option</Label>
+              <PrivacyLevelPicker
+                compact
+                value={form.privacyLevel}
+                onChange={(v) => set("privacyLevel", v)}
+              />
+              {form.privacyLevel === PRIVACY_LEVEL.A && form.photo && (
+                <p className="text-[11px] text-muted-foreground">
+                  Maximum privacy keeps no photo. Yours is removed when you save.
+                </p>
+              )}
+            </div>
+
+            {/* Photo — uploads on pick, saved with the form. Not offered on A. */}
+            {form.privacyLevel !== PRIVACY_LEVEL.A && (
+            <div className="flex items-center gap-3">
+              <UserAvatar
+                user={{ name: form.displayName || form.name, avatar: form.photo || undefined }}
+                className="size-16"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                <input
+                  ref={photoInput}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    pickPhoto(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-11 md:h-9"
+                  disabled={uploading}
+                  onClick={() => photoInput.current?.click()}
+                >
+                  <Camera className="size-4" />
+                  {uploading ? "Uploading…" : form.photo ? "Change photo" : "Upload photo"}
+                </Button>
+                {form.photo && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-11 md:h-9"
+                    disabled={uploading}
+                    onClick={() => set("photo", "")}
+                  >
+                    <Trash2 className="size-4" /> Remove
+                  </Button>
+                )}
+              </div>
+            </div>
+            )}
+
+            <div className="space-y-1">
               <Label htmlFor="me-name">Full name</Label>
               <Input
                 id="me-name"
                 value={form.name}
                 onChange={(e) => set("name", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="me-display-name">Display name</Label>
+              <Input
+                id="me-display-name"
+                className="text-base md:text-sm"
+                maxLength={100}
+                value={form.displayName || ""}
+                onChange={(e) => set("displayName", e.target.value)}
+                placeholder="How you'd like to be shown"
               />
             </div>
 
@@ -206,7 +325,9 @@ export function MemberProfileEditor({ open, onOpenChange, regNo, onSaved }) {
             />
 
             <div className="space-y-1">
-              <Label htmlFor="me-dob">Date of birth</Label>
+              <Label htmlFor="me-dob">
+                Date of birth{form.privacyLevel === PRIVACY_LEVEL.A ? " (optional)" : ""}
+              </Label>
               <Input
                 id="me-dob"
                 type="date"
@@ -295,7 +416,7 @@ export function MemberProfileEditor({ open, onOpenChange, regNo, onSaved }) {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="h-9" disabled={busy}>
+              <Button type="submit" size="sm" className="h-9" disabled={busy || uploading}>
                 {busy ? "Saving…" : "Save changes"}
               </Button>
             </DialogFooter>

@@ -11,6 +11,9 @@ import {
   MapPin,
   Eye,
   EyeOff,
+  ShieldCheck,
+  Camera,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button.jsx";
 import { Input } from "@/components/ui/input.jsx";
@@ -24,6 +27,12 @@ import { useAuth } from "@/hooks/use-auth.js";
 import { useTaxonomy } from "@/hooks/use-p2p.js";
 import { LocationSelect } from "@/components/location-select.jsx";
 import { cn } from "@/lib/utils.js";
+import { PrivacyLevelPicker } from "@/components/privacy-level-picker.jsx";
+import { UserAvatar } from "@/components/user-avatar.jsx";
+import { PRIVACY_LEVEL } from "@/api/config.js";
+import { uploadFile } from "@/api/http.js";
+
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 const STEPS = ["Your details", "Specializations"];
 
@@ -50,8 +59,13 @@ export default function Register() {
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({
     role: "seeker",
+    // Sign-up option (client sheet row 2): A = maximum privacy, B = balanced.
+    privacyLevel: PRIVACY_LEVEL.B,
+    displayName: "",
+    photo: "",
     name: "",
     email: "",
     password: "",
@@ -66,17 +80,47 @@ export default function Register() {
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const isOfferer = form.role === "offerer";
+  // A asks for no real name, photo, birth date or location.
+  const isPrivate = form.privacyLevel === PRIVACY_LEVEL.A;
+
+  const pickPhoto = async (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Choose an image file", { description: `${file.name} is not an image.` });
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      toast.error("Photo too large", { description: "Pick an image under 5 MB." });
+      return;
+    }
+    setUploading(true);
+    try {
+      set("photo", await uploadFile(file));
+    } catch (err) {
+      toast.error("Photo not uploaded", { description: err.message });
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const validateStep1 = () => {
     const e = {};
-    if (!form.name.trim()) e.name = "Name is required";
+    if (!form.displayName.trim()) e.displayName = "Display name is required";
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email)) e.email = "Enter a valid email";
     if (form.password.length < 6) e.password = "At least 6 characters";
-    if (!form.dob) e.dob = "Required";
-    if (!form.country.trim()) e.country = "Required";
-    if (!form.city.trim()) e.city = "Required";
+    if (!isPrivate) {
+      if (!form.dob) e.dob = "Date of birth is required";
+      if (!form.country.trim()) e.country = "Country is required";
+      if (!form.city.trim()) e.city = "City is required";
+    }
     setErrors(e);
-    return Object.keys(e).length === 0;
+    const missing = Object.keys(e).length;
+    if (missing) {
+      toast.error(`Missing ${missing} field${missing > 1 ? "s" : ""}`, {
+        description: Object.values(e).join(", "),
+      });
+    }
+    return missing === 0;
   };
 
   const next = () => {
@@ -91,7 +135,14 @@ export default function Register() {
     }
     setBusy(true);
     try {
-      const res = await registerWithApi(form);
+      // Option A collects no real name or photo: the display name is the name.
+      const res = await registerWithApi({
+        ...form,
+        displayName: form.displayName.trim(),
+        name: (isPrivate ? "" : form.name.trim()) || form.displayName.trim(),
+        photo: isPrivate ? "" : form.photo,
+        dob: isPrivate ? "" : form.dob,
+      });
       if (!res.ok) {
         setStep(0);
         setErrors({ email: res.error });
@@ -199,10 +250,82 @@ export default function Register() {
                 </div>
               </div>
 
+              {/* Sign-up option — client sheet row 2 (A and B for the MVP). */}
+              <div className="space-y-2">
+                <Label>How much do you want to share?</Label>
+                <PrivacyLevelPicker
+                  value={form.privacyLevel}
+                  onChange={(v) => set("privacyLevel", v)}
+                />
+              </div>
+
+              {!isPrivate && (
+                <div className="flex items-center gap-3">
+                  <UserAvatar
+                    user={{ name: form.displayName || "?", avatar: form.photo || undefined }}
+                    className="size-14"
+                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-11 md:h-9"
+                      disabled={uploading}
+                      onClick={() => document.getElementById("reg-photo")?.click()}
+                    >
+                      <Camera className="size-4" />
+                      {uploading ? "Uploading…" : form.photo ? "Change photo" : "Add photo (optional)"}
+                    </Button>
+                    <input
+                      id="reg-photo"
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        pickPhoto(e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                    {form.photo && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-11 md:h-9"
+                        onClick={() => set("photo", "")}
+                      >
+                        <Trash2 className="size-4" /> Remove
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Full name" error={errors.name} className="sm:col-span-2">
-                  <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Jane Doe" />
+                <Field
+                  label="Display name"
+                  error={errors.displayName}
+                  className={isPrivate ? "sm:col-span-2" : ""}
+                >
+                  <Input
+                    className="text-base md:text-sm"
+                    maxLength={100}
+                    value={form.displayName}
+                    onChange={(e) => set("displayName", e.target.value)}
+                    placeholder={isPrivate ? "Any name, it need not be real" : "How others see you"}
+                  />
                 </Field>
+                {!isPrivate && (
+                  <Field label="Full name (optional)" error={errors.name}>
+                    <Input
+                      className="text-base md:text-sm"
+                      value={form.name}
+                      onChange={(e) => set("name", e.target.value)}
+                      placeholder="Jane Doe"
+                    />
+                  </Field>
+                )}
                 <Field label="Email" error={errors.email}>
                   <Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="you@example.com" />
                 </Field>
@@ -225,15 +348,23 @@ export default function Register() {
                     </button>
                   </div>
                 </Field>
-                <Field label="Date of birth" error={errors.dob}>
-                  <Input
-                    type="date"
-                    value={form.dob}
-                    onChange={(e) => set("dob", e.target.value)}
-                    max={new Date().toISOString().slice(0, 10)}
-                  />
-                </Field>
+                {!isPrivate && (
+                  <Field label="Date of birth" error={errors.dob}>
+                    <Input
+                      type="date"
+                      value={form.dob}
+                      onChange={(e) => set("dob", e.target.value)}
+                      max={new Date().toISOString().slice(0, 10)}
+                    />
+                  </Field>
+                )}
                 <div className="sm:col-span-2">
+                  {isPrivate && (
+                    <p className="mb-1 text-[11px] text-muted-foreground">
+                      Location is optional. Add a country or city only if you want help
+                      nearby.
+                    </p>
+                  )}
                   <LocationSelect
                     country={form.country}
                     city={form.city}
@@ -280,6 +411,23 @@ export default function Register() {
                   />
                 </div>
               )}
+
+              {/* Onboarding privacy notice (client feedback, 2026-10-06). */}
+              <div className="flex gap-2.5 rounded-xl border bg-muted/30 p-3">
+                <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" />
+                <p className="text-xs text-muted-foreground">
+                  We only ask for what's needed to create your profile and match you with the
+                  right people. Your email is never shown to other members.{" "}
+                  <Link
+                    to="/how-it-works#privacy"
+                    target="_blank"
+                    rel="noopener"
+                    className="font-semibold text-primary hover:underline"
+                  >
+                    See who can see what
+                  </Link>
+                </p>
+              </div>
 
               <div className="flex justify-end">
                 <Button size="lg" onClick={next}>
@@ -341,12 +489,15 @@ export default function Register() {
                 />
               )}
 
-              <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                  <MapPin className="size-4" /> Location
-                </span>{" "}
-                {form.city}, {form.country} — used to find people near you.
-              </div>
+              {(form.city || form.country) && (
+                <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                    <MapPin className="size-4" /> Location
+                  </span>{" "}
+                  {[form.city, form.country].filter(Boolean).join(", ")} — used to find people
+                  near you.
+                </div>
+              )}
 
               <div className="flex justify-between">
                 <Button variant="outline" size="lg" onClick={() => setStep(0)}>

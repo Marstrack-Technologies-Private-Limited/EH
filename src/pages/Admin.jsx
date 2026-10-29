@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Plus,
@@ -48,10 +48,10 @@ import {
   diffSavedUser,
   USER_FIELDS_NOT_STORED,
 } from "@/api/p2p.js";
-import { USER_TYPE } from "@/api/config.js";
+import { PRIVACY_LEVEL, USER_TYPE } from "@/api/config.js";
 import PageContainer from "@/components/layout/page-container.jsx";
 import { LocationSelect } from "@/components/location-select.jsx";
-import { cn } from "@/lib/utils.js";
+import { cn, toYmd } from "@/lib/utils.js";
 
 const VIEW_STORAGE_KEY = "eh_admin_view";
 
@@ -81,9 +81,19 @@ function useViewMode() {
   return [view, update];
 }
 
+const TABS = ["categories", "topics", "services", "members"];
+
 export default function Admin() {
   const { user, apiUser, isApiAuthenticated } = useAuth();
-  const [tab, setTab] = useState("categories");
+  // The dashboard tiles deep-link here: ?tab=members&type=SEEKER opens the
+  // Members tab already filtered to seekers.
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(() =>
+    TABS.includes(params.get("tab")) ? params.get("tab") : "categories",
+  );
+  const memberType = [USER_TYPE.SEEKER, USER_TYPE.OFFERER].includes(params.get("type"))
+    ? params.get("type")
+    : "";
   const [view, setView] = useViewMode();
 
   if (!user || user.role !== "admin") return <Navigate to="/dashboard" replace />;
@@ -133,7 +143,7 @@ export default function Admin() {
           <ServicesTab createdBy={createdBy} view={view} onView={setView} />
         </TabsContent>
         <TabsContent value="members">
-          <MembersTab view={view} onView={setView} />
+          <MembersTab view={view} onView={setView} initialType={memberType} />
         </TabsContent>
       </Tabs>
     </PageContainer>
@@ -1322,8 +1332,8 @@ function MemberTypePill({ type }) {
   );
 }
 
-function MembersTab({ view, onView }) {
-  const [type, setType] = useState("");
+function MembersTab({ view, onView, initialType = "" }) {
+  const [type, setType] = useState(initialType);
   const [sort, toggleSort] = useSort({
     key: "id",
     column: "OM_USER_REG_NO",
@@ -1356,9 +1366,11 @@ function MembersTab({ view, onView }) {
       personalInformation: u.info,
       // The view now returns both dates, so an edit prefills instead of forcing
       // the admin to retype them.
-      dob: u.dob ? String(u.dob).slice(0, 10) : "",
-      registrationDate: u.registeredAt ? String(u.registeredAt).slice(0, 10) : "",
+      dob: toYmd(u.dob),
+      registrationDate: toYmd(u.registeredAt),
       active: u.active,
+      // Only read to relax the checks below; saveUser sends it back unchanged.
+      privacyLevel: u.privacyLevel,
     });
   }, []);
 
@@ -1369,9 +1381,10 @@ function MembersTab({ view, onView }) {
       [!editing.name.trim(), "Name"],
       [!editing.email.trim(), "Email"],
       [!editing.password, "Password"],
-      [!editing.country, "Country"],
-      [!editing.city, "City"],
-      [!editing.dob, "Date of birth"],
+      // Option A (maximum privacy) members gave no location or birth date.
+      [editing.privacyLevel !== PRIVACY_LEVEL.A && !editing.country, "Country"],
+      [editing.privacyLevel !== PRIVACY_LEVEL.A && !editing.city, "City"],
+      [editing.privacyLevel !== PRIVACY_LEVEL.A && !editing.dob, "Date of birth"],
     ]
       .filter(([bad]) => bad)
       .map(([, label]) => label);

@@ -6,7 +6,6 @@ import {
   Paperclip,
   X,
   AlertCircle,
-  Clock,
   Users,
   User as UserIcon,
   Layers,
@@ -18,7 +17,18 @@ import {
   Eye,
   Pencil,
   Trash2,
+  Star,
+  CheckCircle2,
+  Plus,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog.jsx";
 import { Button } from "@/components/ui/button.jsx";
 import { Label } from "@/components/ui/label.jsx";
 import { Textarea } from "@/components/ui/textarea.jsx";
@@ -38,6 +48,9 @@ import {
   useSeekAttachmentIndex,
   useSeekDetailIndex,
   useSeeks,
+  useTopics,
+  useOffererResponseIndex,
+  useRatings,
   useUserCategories,
   useUserTopics,
   useUsers,
@@ -46,16 +59,19 @@ import {
   deleteSeekAttachment,
   getUserByRegNo,
   isImageFile,
+  isSeekComplete,
   saveSeek,
   saveSeekAttachment,
   saveSeekDetail,
 } from "@/api/p2p.js";
 import { uploadFile } from "@/api/http.js";
-import { URGENCY_OPTIONS, USER_TYPE, WEEK_DAYS } from "@/api/config.js";
+import { RESPONSE_DECISION, USER_TYPE, WEEK_DAYS } from "@/api/config.js";
+import { RateOffererDialog } from "@/components/rate-offerer-dialog.jsx";
 import PageContainer from "@/components/layout/page-container.jsx";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs.jsx";
 import { SeekViewerDialog } from "@/components/seek-viewer.jsx";
 import { cn, hasId } from "@/lib/utils.js";
+import { composeSeekDetail, parseSeekDetail } from "@/lib/seek-matching.js";
 
 /** Who the request goes to. */
 const AUDIENCE = {
@@ -94,30 +110,11 @@ function formatWhen(dateValue, timeValue) {
 }
 
 /**
- * Compose the single detail line a seek is allowed.
- *
- * SP 1822 upserts on the seek id, so a seek has exactly one
- * OT_SEEK_PROBLEMS_REPORTED string — there is no row-per-topic. The topic
- * selection and the chosen offerer are the two things the header cannot hold,
- * so both go here, labelled, and `parseProblems` reads them back out.
- *
- * This is a stopgap for the missing columns, not a schema. If the backend adds
- * a real detail table with a topic id and an offerer id, delete this pair of
- * functions and write to those columns instead.
+ * The single detail line a seek is allowed (SP 1822 upserts on the seek id) —
+ * topics and the chosen offerer, labelled. Composed and parsed in
+ * `lib/seek-matching.js`, which is also what decides which offerers see it.
  */
-function composeProblems({ topicNames, offererName }) {
-  const parts = [];
-  if (topicNames.length) parts.push(`Topics: ${topicNames.join(", ")}`);
-  if (offererName) parts.push(`To: ${offererName}`);
-  return parts.join(" | ");
-}
-
-function parseProblems(text) {
-  if (!text) return { topics: "", to: "", raw: "" };
-  const topics = /Topics:\s*([^|]*)/.exec(text)?.[1]?.trim() || "";
-  const to = /To:\s*([^|]*)/.exec(text)?.[1]?.trim() || "";
-  return { topics, to, raw: topics || to ? "" : text.trim() };
-}
+const parseProblems = parseSeekDetail;
 
 /** A stored DATETIME back into the "HH:MM" an <input type="time"> wants. */
 function toTimeInput(value) {
@@ -132,13 +129,6 @@ function fileLabel(url, i) {
   const tail = String(url).split("/").pop() || "";
   return tail ? `File ${i + 1} (${tail.slice(0, 8)}…)` : `File ${i + 1}`;
 }
-
-const URGENCY_TONE = {
-  Critical: "bg-destructive/15 text-destructive",
-  "Semi urgent": "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  Moderate: "bg-primary/15 text-primary",
-  "Can wait": "bg-muted text-muted-foreground",
-};
 
 /**
  * Seek Assistance — the seeker's enquiry, saved as the first ticket.
@@ -171,6 +161,7 @@ export default function SeekAssistance() {
   );
 
   const myTopics = useUserTopics({ userId: regNo });
+  const allTopics = useTopics();
   const myAreas = useUserCategories({ userId: regNo });
   const categories = useCategories();
   const offerers = useUsers({
@@ -181,13 +172,19 @@ export default function SeekAssistance() {
   const seeks = useSeeks({ seekerId: regNo });
   const seekDetails = useSeekDetailIndex();
   const seekAttachments = useSeekAttachmentIndex();
+  const responses = useOffererResponseIndex();
+  const myRatings = useRatings({ seekerId: regNo });
+  // { seekId, offerer } while the rating dialog is open.
+  const [rating, setRating] = useState(null);
 
   const [targetOfferer, setTargetOfferer] = useState(null);
   const [pickedCategoryIds, setPickedCategoryIds] = useState(null);
   const [categoryTouched, setCategoryTouched] = useState(false);
   const [selectedTopicIds, setSelectedTopicIds] = useState(null);
+  // "Request a service" popup — ticks are drafted here and applied on Done.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [draftTopicIds, setDraftTopicIds] = useState(new Set());
   const [issue, setIssue] = useState("");
-  const [urgency, setUrgency] = useState(URGENCY_OPTIONS[0]);
   const [byEmail, setByEmail] = useState(true);
   const [byWhatsapp, setByWhatsapp] = useState(false);
   const [byCall, setByCall] = useState(false);
@@ -198,7 +195,8 @@ export default function SeekAssistance() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [viewingId, setViewingId] = useState(null);
-  const [tab, setTab] = useState("raise");
+  // ?tab=list opens straight on "My requests" (linked from the seeker Dashboard).
+  const [tab, setTab] = useState(params.get("tab") === "list" ? "list" : "raise");
   // When set, Submit updates this ticket instead of raising a new one. The
   // original date/time ride along so an edit does not silently re-stamp when
   // the request was raised.
@@ -219,14 +217,42 @@ export default function SeekAssistance() {
     };
   }, [offererParam]);
 
-  // Seed the topic selection from the seeker's saved interests, once loaded.
-  useEffect(() => {
-    if (selectedTopicIds === null && myTopics.data.length > 0) {
-      setSelectedTopicIds(new Set(myTopics.data.map((t) => t.topicId)));
-    }
-  }, [myTopics.data, selectedTopicIds]);
-
   const chosen = useMemo(() => selectedTopicIds ?? new Set(), [selectedTopicIds]);
+
+  /**
+   * Every service the seeker can request: all topics in active categories
+   * (view 1693), with their own saved topics flagged and listed first.
+   *
+   * Nothing is pre-ticked (client, 2026-10-30): a seeker asking for one thing
+   * must not have every saved interest sent along with it. Falls back to their
+   * saved topics if the full list can't be read.
+   */
+  const topicPool = useMemo(() => {
+    const mine = new Set(myTopics.data.map((t) => t.topicId));
+    const activeCats = new Set(categories.data.filter((c) => c.active).map((c) => c.id));
+    const source = allTopics.data.length
+      ? allTopics.data.map((t) => ({
+          topicId: t.id,
+          topicName: t.name,
+          categoryId: t.categoryId,
+          categoryName: t.categoryName,
+        }))
+      : myTopics.data;
+    return source
+      .filter((t) => !activeCats.size || activeCats.has(t.categoryId) || mine.has(t.topicId))
+      .map((t) => ({ ...t, mine: mine.has(t.topicId) }))
+      .sort(
+        (a, b) =>
+          Number(b.mine) - Number(a.mine) ||
+          a.categoryName.localeCompare(b.categoryName) ||
+          a.topicName.localeCompare(b.topicName),
+      );
+  }, [allTopics.data, myTopics.data, categories.data]);
+
+  const chosenTopics = useMemo(
+    () => topicPool.filter((t) => chosen.has(t.topicId)),
+    [topicPool, chosen],
+  );
 
   /** Files already on the ticket being edited — shown so they are not re-uploaded. */
   const existingAttachments = useMemo(
@@ -250,13 +276,13 @@ export default function SeekAssistance() {
    */
   const spannedCategories = useMemo(() => {
     const byId = new Map();
-    for (const t of myTopics.data) {
-      if (chosen.has(t.topicId) && !byId.has(t.categoryId)) {
+    for (const t of chosenTopics) {
+      if (!byId.has(t.categoryId)) {
         byId.set(t.categoryId, { id: t.categoryId, name: t.categoryName });
       }
     }
     return [...byId.values()];
-  }, [myTopics.data, chosen]);
+  }, [chosenTopics]);
 
   /**
    * Categories suggested from what the seeker has already told us — every
@@ -315,22 +341,32 @@ export default function SeekAssistance() {
       setCategoryTouched(true);
       setPickedCategoryIds(nextCategories);
 
-      // The topic list and the category list describe the same choice, so keep
-      // them in step: ticking a category ticks its topics, unticking clears them.
+      // Unticking a category drops its services. Ticking one adds none — the
+      // seeker picks services themselves (client, 2026-10-30).
       setSelectedTopicIds((prev) => {
-        const next = new Set(prev ?? myTopics.data.map((t) => t.topicId));
-        for (const t of myTopics.data) {
-          // Editing collapses to one category, so topics outside it go too.
+        const next = new Set(prev ?? []);
+        for (const t of topicPool) {
+          // Editing collapses to one category, so services outside it go too.
           if (editing && t.categoryId !== id) next.delete(t.topicId);
-          if (t.categoryId !== id) continue;
-          if (turnedOn) next.add(t.topicId);
-          else next.delete(t.topicId);
+          if (t.categoryId === id && !turnedOn) next.delete(t.topicId);
         }
         return next;
       });
     },
-    [categoryIds, editing, myTopics.data],
+    [categoryIds, editing, topicPool],
   );
+
+  const openPicker = () => {
+    setDraftTopicIds(new Set(chosen));
+    setPickerOpen(true);
+  };
+
+  const applyPicker = () => {
+    setSelectedTopicIds(new Set(draftTopicIds));
+    // Let the categories follow the services just picked.
+    if (!editing) setCategoryTouched(false);
+    setPickerOpen(false);
+  };
 
   const toggleTopic = (id) =>
     setSelectedTopicIds((prev) => {
@@ -354,16 +390,14 @@ export default function SeekAssistance() {
     const m = [];
     if (!issue.trim()) m.push("Description of the issue");
     if (!categoryIds.length) m.push("Category");
-    if (!urgency) m.push("Urgency");
     if (audience === AUDIENCE.OFFERER && !targetOfferer) m.push("Offerer");
-    if (audience === AUDIENCE.TOPICS && chosen.size === 0) m.push("At least one topic");
+    if (audience === AUDIENCE.TOPICS && chosen.size === 0) m.push("At least one service");
     if (!byEmail && !byWhatsapp && !byCall) m.push("At least one way to contact you");
     if ((byWhatsapp || byCall) && !phone.trim()) m.push("Phone / WhatsApp number");
     return m;
   }, [
     issue,
     categoryIds,
-    urgency,
     audience,
     targetOfferer,
     chosen.size,
@@ -385,9 +419,15 @@ export default function SeekAssistance() {
     (seek) => {
       const detail = parseProblems(seekDetails.index.get(seek.id));
 
-      setEditing({ id: seek.id, raisedOn: seek.raisedOn, raisedAt: seek.raisedAt });
+      // Urgency is no longer asked for (client, 2026-09-24), but an older ticket
+      // may carry one — hand it back unchanged so an edit does not blank it.
+      setEditing({
+        id: seek.id,
+        raisedOn: seek.raisedOn,
+        raisedAt: seek.raisedAt,
+        urgency: seek.urgency,
+      });
       setIssue(seek.narration || "");
-      setUrgency(seek.urgency || URGENCY_OPTIONS[0]);
       setByEmail(seek.byEmail);
       setByWhatsapp(seek.byWhatsapp);
       setByCall(Boolean(seek.callOn) && !seek.byWhatsapp);
@@ -405,7 +445,7 @@ export default function SeekAssistance() {
         : [];
       setSelectedTopicIds(
         new Set(
-          myTopics.data.filter((t) => names.includes(t.topicName.toLowerCase())).map((t) => t.topicId),
+          topicPool.filter((t) => names.includes(t.topicName.toLowerCase())).map((t) => t.topicId),
         ),
       );
 
@@ -417,7 +457,7 @@ export default function SeekAssistance() {
       setTab("raise");
       window.scrollTo({ top: 0, behavior: "smooth" });
     },
-    [seekDetails.index, myTopics.data],
+    [seekDetails.index, topicPool],
   );
 
   /**
@@ -467,7 +507,6 @@ export default function SeekAssistance() {
     setIssue("");
     setFiles([]);
     setCategoryTouched(false);
-    setUrgency(URGENCY_OPTIONS[0]);
     setByEmail(true);
     setByWhatsapp(false);
     setByCall(false);
@@ -475,6 +514,30 @@ export default function SeekAssistance() {
     setPreferredWeekDay("");
     setPreferredTime("");
   }, []);
+
+  /**
+   * Offerers the seeker can rate for one seek: those who ACCEPTED it (view
+   * 1903), else — while 1903 is down — the offerer the seek was sent to.
+   */
+  const offerersToRate = useCallback(
+    (seek) => {
+      const accepted = (responses.index.get(seek.id) || [])
+        .filter((r) => r.decision === RESPONSE_DECISION.ACCEPT)
+        .map((r) => r.offererId);
+      const toId = parseProblems(seekDetails.index.get(seek.id)).toId;
+      const ids = [...new Set(accepted.length ? accepted : hasId(toId) ? [toId] : [])];
+      return ids.map(
+        (id) => offerers.data.find((o) => o.id === id) || { id, name: `Offerer #${id}` },
+      );
+    },
+    [responses.index, seekDetails.index, offerers.data],
+  );
+
+  // One rating per (request, offerer) — 1907 now carries the request id.
+  const ratedKeys = useMemo(
+    () => new Set(myRatings.data.map((r) => `${r.seekId}:${r.offererId}`)),
+    [myRatings.data],
+  );
 
   const reloadSeeks = seeks.reload;
   const reloadDetails = seekDetails.reload;
@@ -497,9 +560,7 @@ export default function SeekAssistance() {
       return;
     }
 
-    const topicNames = myTopics.data
-      .filter((t) => chosen.has(t.topicId))
-      .map((t) => t.topicName);
+    const topicNames = chosenTopics.map((t) => t.topicName);
 
     const confirmLines = [
       editing ? `Update enquiry #${editing.id}?` : "Submit this enquiry?",
@@ -510,7 +571,6 @@ export default function SeekAssistance() {
       !editing && categoryIds.length > 1
         ? `This raises ${categoryIds.length} tickets — one per category.`
         : null,
-      `Urgency: ${urgency}`,
       `Contact: ${[byEmail && "email", byWhatsapp && "WhatsApp", byCall && "call"]
         .filter(Boolean)
         .join(", ")}${phone.trim() ? ` (${phone.trim()})` : ""}`,
@@ -544,10 +604,20 @@ export default function SeekAssistance() {
         }
       }
 
-      const problems = composeProblems({
-        topicNames: audience === AUDIENCE.TOPICS ? topicNames : [],
-        offererName: audience === AUDIENCE.OFFERER ? targetOfferer?.name : "",
-      });
+      // Each ticket carries only the topics of its own category: offerers are
+      // matched on these, so a Mental Health ticket listing Career topics would
+      // reach the wrong people. A seek sent to one offerer stores their id.
+      const problemsFor = (cid) =>
+        composeSeekDetail({
+          topicNames:
+            audience === AUDIENCE.TOPICS
+              ? chosenTopics
+                  .filter((t) => t.categoryId === cid)
+                  .map((t) => t.topicName)
+              : [],
+          offererName: audience === AUDIENCE.OFFERER ? targetOfferer?.name : "",
+          offererId: audience === AUDIENCE.OFFERER ? targetOfferer?.id : null,
+        });
       // One header per category. The header carries a single
       // OT_SEEKER_CATEGORY_ID and that value is what the offerer inbox filters
       // on, so a request that should reach two categories needs two rows.
@@ -564,7 +634,7 @@ export default function SeekAssistance() {
           seekerId: regNo,
           categoryId: cid,
           narration: issue.trim(),
-          urgency,
+          urgency: editing?.urgency || "",
           byEmail,
           byWhatsapp,
           callOn: byWhatsapp || byCall ? phone.trim() : "",
@@ -576,6 +646,7 @@ export default function SeekAssistance() {
 
         // Both of these are keyed on the header id, so they can only run once
         // it has landed. Neither failure should lose the ticket already saved.
+        const problems = problemsFor(cid);
         if (problems) {
           try {
             await saveSeekDetail({ seekId: res.id, problems });
@@ -639,11 +710,9 @@ export default function SeekAssistance() {
     missing,
     regNo,
     audience,
-    chosen,
     files,
     categories.data,
     categoryIds,
-    urgency,
     byEmail,
     byWhatsapp,
     byCall,
@@ -651,7 +720,7 @@ export default function SeekAssistance() {
     preferredWeekDay,
     preferredTime,
     issue,
-    myTopics.data,
+    chosenTopics,
     targetOfferer,
     editing,
     reloadSeeks,
@@ -775,44 +844,46 @@ export default function SeekAssistance() {
 
           {audience === AUDIENCE.TOPICS && (
             <div className="border-t pt-3">
-              <p className="text-sm font-semibold">Topics</p>
+              <p className="text-sm font-semibold">Services you need</p>
               <p className="mb-2 text-[11px] text-muted-foreground">
-                Your saved topics, pre-ticked. Untick any that don't apply — this only
-                affects the enquiry, not your saved interests.
+                Pick only what this request is about. Offerers of these services will see
+                it.
               </p>
-              {myTopics.loading ? (
-                <div className="flex gap-1.5">
-                  <div className="shimmer h-6 w-24 rounded-full" />
-                  <div className="shimmer h-6 w-20 rounded-full" />
-                </div>
-              ) : myTopics.data.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">
-                  You haven't picked any topics yet —{" "}
-                  <Link to="/interests" className="text-primary hover:underline">
-                    add some
-                  </Link>
-                  , or send to a whole category instead.
-                </p>
-              ) : (
-                <CheckList
-                  options={myTopics.data.map((t) => ({
-                    value: t.topicId,
-                    label: t.topicName,
-                    hint: t.categoryName,
-                  }))}
-                  selected={chosen}
-                  onToggle={(id) => toggleTopic(id)}
-                  onToggleAll={(shown, allSelected) =>
-                    setSelectedTopicIds(
-                      allSelected ? new Set() : new Set(shown.map((o) => o.value)),
-                    )
-                  }
-                  searchable
-                  searchPlaceholder="Search your topics…"
-                  selectAllLabel="Tick all my topics"
-                  listClassName="max-h-56"
-                />
+
+              {chosenTopics.length > 0 && (
+                <ul className="mb-2 flex flex-wrap gap-1.5">
+                  {chosenTopics.map((t) => (
+                    <li
+                      key={t.topicId}
+                      className="flex items-center gap-1 rounded-full bg-primary/10 py-0.5 pl-3 pr-0.5 text-xs font-medium text-primary"
+                    >
+                      <span className="max-w-[14rem] truncate" title={`${t.topicName} · ${t.categoryName}`}>
+                        {t.topicName}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => toggleTopic(t.topicId)}
+                        aria-label={`Remove ${t.topicName}`}
+                        className="flex size-8 items-center justify-center rounded-full hover:bg-primary/15 cursor-pointer"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               )}
+
+              <Button
+                type="button"
+                size="lg"
+                variant={chosenTopics.length ? "outline" : "default"}
+                className="h-12 w-full text-sm"
+                disabled={allTopics.loading && myTopics.loading}
+                onClick={openPicker}
+              >
+                <Plus className="size-4" />
+                {chosenTopics.length ? "Add or change services" : "Request a service"}
+              </Button>
             </div>
           )}
 
@@ -820,8 +891,8 @@ export default function SeekAssistance() {
           <div className="mt-3 space-y-1 border-t pt-3">
             <p className="text-sm font-semibold">Category this falls under</p>
             <p className="pb-1 text-[11px] text-muted-foreground">
-              Ticking a category ticks its topics above. Offerers who serve a category
-              are the ones who see your request.
+              Filled in from the services you picked. Offerers who serve a category are
+              the ones who see your request.
             </p>
             {/* An inactive category can't be chosen, but one already on the
                 ticket still lists — read-only — so an edit doesn't hide it. */}
@@ -954,26 +1025,8 @@ export default function SeekAssistance() {
           )}
         </section>
 
-        {/* Urgency + contact */}
+        {/* Contact */}
         <section className="grid gap-3 rounded-lg border bg-card p-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <Label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/70">
-              <Clock className="size-3" /> How urgent is this?
-            </Label>
-            <Select value={urgency} onValueChange={setUrgency}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {URGENCY_OPTIONS.map((u) => (
-                  <SelectItem key={u} value={u}>
-                    {u}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
           <div className="space-y-1">
             <Label className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
               Preferred day
@@ -1089,16 +1142,6 @@ export default function SeekAssistance() {
                 <li key={s.id} className="rounded-md border p-2.5">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="font-mono text-[11px] font-semibold">#{s.id}</span>
-                    {s.urgency && (
-                      <span
-                        className={cn(
-                          "rounded-full px-2 py-0.5 text-[10px] font-medium",
-                          URGENCY_TONE[s.urgency] || "bg-muted text-muted-foreground",
-                        )}
-                      >
-                        {s.urgency}
-                      </span>
-                    )}
                     <span className="text-[10px] text-muted-foreground">
                       {formatWhen(s.raisedOn, s.raisedAt)}
                     </span>
@@ -1175,6 +1218,55 @@ export default function SeekAssistance() {
                       {s.preferredTime ? ` at ${toTimeInput(s.preferredTime)}` : ""}
                     </p>
                   )}
+                  {(responses.index.get(s.id) || []).length > 0 && (
+                    <ul className="mt-1.5 space-y-1">
+                      {responses.index.get(s.id).map((r, i) => (
+                        <li key={`${r.offererId}-${i}`} className="rounded bg-muted/60 px-2 py-1 text-[10px]">
+                          <span className="font-medium">
+                            {offerers.data.find((o) => o.id === r.offererId)?.name ||
+                              `Offerer #${r.offererId}`}
+                          </span>{" "}
+                          {r.decision === RESPONSE_DECISION.ACCEPT ? "accepted" : "declined"}
+                          {r.respondedAt && (
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · {formatWhen(r.respondedAt, r.respondedAt)}
+                            </span>
+                          )}
+                          {r.narration && <>: {r.narration}</>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {/* Rating unlocks only once the work is complete (client, 2026-10-30). */}
+                  {offerersToRate(s).length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {offerersToRate(s).map((o) =>
+                        ratedKeys.has(`${s.id}:${o.id}`) ? (
+                          <span
+                            key={o.id}
+                            className="flex items-center gap-1 text-[10px] text-muted-foreground"
+                          >
+                            <CheckCircle2 className="size-3" /> You rated {o.name}
+                          </span>
+                        ) : isSeekComplete(s) ? (
+                          <Button
+                            key={o.id}
+                            size="sm"
+                            variant="outline"
+                            className="h-11 md:h-8"
+                            onClick={() => setRating({ seekId: s.id, offerer: o })}
+                          >
+                            <Star className="size-3.5" /> Rate {o.name}
+                          </Button>
+                        ) : (
+                          <span key={o.id} className="text-[10px] text-muted-foreground">
+                            You can rate {o.name} once the work is complete.
+                          </span>
+                        ),
+                      )}
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -1192,6 +1284,61 @@ export default function SeekAssistance() {
           works yet. See PENDING-BACKEND.md.
         </p>
       </div>
+
+      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Request a service</DialogTitle>
+            <DialogDescription>
+              Tick what you need help with. Your saved topics are listed first.
+            </DialogDescription>
+          </DialogHeader>
+          {allTopics.loading && myTopics.loading ? (
+            <div className="space-y-2">
+              <div className="shimmer h-10 rounded-lg" />
+              <div className="shimmer h-10 rounded-lg" />
+            </div>
+          ) : (
+            <CheckList
+              options={topicPool.map((t) => ({
+                value: t.topicId,
+                label: t.topicName,
+                hint: t.mine ? `${t.categoryName} · your topic` : t.categoryName,
+              }))}
+              selected={draftTopicIds}
+              onToggle={(id) =>
+                setDraftTopicIds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(id)) next.delete(id);
+                  else next.add(id);
+                  return next;
+                })
+              }
+              searchable
+              searchPlaceholder="Search services…"
+              emptyText="No services have been set up yet."
+              listClassName="max-h-[50vh]"
+            />
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" className="h-11 md:h-9" onClick={() => setPickerOpen(false)}>
+              Cancel
+            </Button>
+            <Button className="h-11 md:h-9" onClick={applyPicker}>
+              Done{draftTopicIds.size ? ` (${draftTopicIds.size})` : ""}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <RateOffererDialog
+        open={rating !== null}
+        onOpenChange={(open) => !open && setRating(null)}
+        offerer={rating?.offerer}
+        seekId={rating?.seekId}
+        seekerId={regNo}
+        onSaved={myRatings.reload}
+      />
 
       <SeekViewerDialog
         seek={seeks.data.find((s) => s.id === viewingId) || null}

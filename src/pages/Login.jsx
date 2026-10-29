@@ -224,6 +224,11 @@ export default function Login() {
               Create an account
             </Link>
           </p>
+          <p className="text-center text-[13px]">
+            <Link to="/how-it-works" className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+              How EH works and keeps your details private
+            </Link>
+          </p>
         </div>
       </div>
     </div>

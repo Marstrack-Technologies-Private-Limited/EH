@@ -8,13 +8,6 @@ import {
 } from "@/components/ui/dialog.jsx";
 import { cn } from "@/lib/utils.js";
 
-const URGENCY_TONE = {
-  Critical: "bg-destructive/15 text-destructive",
-  "Semi urgent": "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  Moderate: "bg-primary/15 text-primary",
-  "Can wait": "bg-muted text-muted-foreground",
-};
-
 /** Clock only — the date half of a preferred-contact time carries no meaning. */
 function formatTime(value) {
   if (!value) return "";
@@ -157,16 +150,6 @@ function SeekViewerBody({ seek, detail, attachments, seeker, categoryName }) {
         <DialogHeader className="shrink-0">
           <DialogTitle className="flex flex-wrap items-center gap-2 pr-8">
             <span className="font-mono text-sm">#{seek.id}</span>
-            {seek.urgency && (
-              <span
-                className={cn(
-                  "rounded-full px-2 py-0.5 text-[11px] font-medium",
-                  URGENCY_TONE[seek.urgency] || "bg-muted text-muted-foreground",
-                )}
-              >
-                {seek.urgency}
-              </span>
-            )}
             <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
               {seek.closed || "Open"}
             </span>
@@ -212,7 +195,6 @@ function SeekViewerBody({ seek, detail, attachments, seeker, categoryName }) {
             <Field label="Ticket" value={`#${seek.id}`} />
             <Field label="Status" value={seek.closed || "Open"} />
             <Field label="Category" value={categoryName} />
-            <Field label="Urgency" value={seek.urgency} />
             <Field label="Raised on" value={formatDate(seek.raisedOn)} />
             <Field label="Raised at" value={formatTime(seek.raisedAt)} />
             <Field label="Contact via" value={contact.join(", ")} />

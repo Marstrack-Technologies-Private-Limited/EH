@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
   Sparkles,
@@ -10,12 +11,24 @@ import {
   RefreshCw,
   MapPin,
   AlertCircle,
+  ChevronRight,
+  LifeBuoy,
 } from "lucide-react";
+import { MatchRing } from "@/components/match-ring.jsx";
+import { useOffererMatches } from "@/hooks/use-offerer-matches.js";
+import { isSeekOpen } from "@/api/p2p.js";
 import { Button } from "@/components/ui/button.jsx";
 import { useAuth } from "@/hooks/use-auth.js";
-import { useCounts, useUsers } from "@/hooks/use-p2p.js";
+import {
+  useCounts,
+  useMyRegNo,
+  useOffererRequests,
+  useSeeks,
+  useUsers,
+} from "@/hooks/use-p2p.js";
+import { parseSeekDetail } from "@/lib/seek-matching.js";
 import { USER_TYPE } from "@/api/config.js";
-import { cn } from "@/lib/utils.js";
+import { cn, hasId } from "@/lib/utils.js";
 import PageContainer from "@/components/layout/page-container.jsx";
 
 export default function Dashboard() {
@@ -159,56 +172,196 @@ function PeopleList({ title, users, loading, error, reload, emptyText }) {
 
 function SeekerDashboard() {
   const { user } = useAuth();
-  const { counts, loading, error, reload } = useCounts();
-  const offerers = useUsers({ type: USER_TYPE.OFFERER });
+  const matches = useOffererMatches(user);
+  const seeks = useSeeks({ seekerId: matches.regNo });
+
+  const ranked = useMemo(
+    () => matches.rows.filter((r) => r.isMatch).sort((a, b) => b.score - a.score),
+    [matches.rows],
+  );
+  const openSeeks = seeks.data.filter(isSeekOpen).length;
+  const needs = matches.myTopics.length + matches.myAreas.length;
+  const hasNeeds = needs > 0;
 
   return (
     <Wrap>
       <Heading
         title={`Hi ${String(user.name).split(" ")[0]}`}
-        subtitle="People and topics available to you right now."
+        subtitle="Your matches and requests at a glance."
         action={
-          <Button size="sm" className="h-9 shrink-0" asChild>
-            <Link to="/search">
-              <SearchIcon className="size-4" /> Discover
+          <Button size="sm" className="h-11 shrink-0 md:h-9" asChild>
+            <Link to="/offerers">
+              <SearchIcon className="size-4" /> Find offerers
             </Link>
           </Button>
         }
       />
 
-      <ErrorNote error={error} onRetry={reload} />
+      <ErrorNote error={matches.error || seeks.error} onRetry={matches.reload} />
 
+      {/* Each tile is the seeker's own number and opens the page behind it. */}
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
-        <Stat label="Offerers" value={counts?.offerers ?? 0} icon={Sparkles} loading={loading} />
-        <Stat label="Categories" value={counts?.categories ?? 0} icon={Layers} loading={loading} />
-        <Stat label="Topics" value={counts?.topics ?? 0} icon={Tag} loading={loading} />
-        <Stat label="Services" value={counts?.services ?? 0} icon={Briefcase} loading={loading} />
+        <Stat
+          label="Matched offerers"
+          value={ranked.length}
+          icon={Sparkles}
+          loading={matches.loading}
+          to="/offerers?sort=match&matches=1"
+        />
+        <Stat
+          label="Open requests"
+          value={openSeeks}
+          icon={LifeBuoy}
+          loading={seeks.loading}
+          to="/seek-assistance?tab=list"
+        />
+        <Stat
+          label="My topics & areas"
+          value={needs}
+          icon={Tag}
+          loading={matches.loading}
+          to="/profile"
+        />
+        <Stat
+          label="Offerers available"
+          value={matches.rows.length}
+          icon={Users}
+          loading={matches.loading}
+          to="/offerers?sort=name"
+        />
       </div>
 
-      <PeopleList
-        title="Offerers on the platform"
-        users={offerers.data.slice(0, 8)}
-        loading={offerers.loading}
-        error={offerers.error}
-        reload={offerers.reload}
-        emptyText="No offerers have registered yet."
-      />
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold md:text-base">Your top matches</h2>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-9 text-xs" asChild>
+              <Link to="/offerers?sort=match">
+                View all <ArrowRight className="size-3.5" />
+              </Link>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-9"
+              onClick={matches.reload}
+              disabled={matches.loading}
+              aria-label="Refresh"
+            >
+              <RefreshCw className={cn("size-3.5", matches.loading && "animate-spin")} />
+            </Button>
+          </div>
+        </div>
+
+        {matches.loading &&
+          Array.from({ length: 3 }, (_, i) => (
+            <div key={i} className="rounded-lg border bg-card px-3 py-2.5">
+              <div className="shimmer h-3.5 w-2/5 rounded" />
+              <div className="shimmer mt-1.5 h-3 w-3/5 rounded" />
+            </div>
+          ))}
+
+        {!matches.loading && !hasNeeds && (
+          <div className="rounded-lg border border-dashed p-4 text-center">
+            <p className="text-xs text-muted-foreground">
+              Add the areas and topics you need help with, and your best-matched
+              offerers will show here.
+            </p>
+            <Button size="sm" className="mt-3 h-11 md:h-9" asChild>
+              <Link to="/profile">Add my needs</Link>
+            </Button>
+          </div>
+        )}
+
+        {!matches.loading && hasNeeds && ranked.length === 0 && (
+          <p className="rounded-lg border p-4 text-center text-xs text-muted-foreground">
+            No offerer covers your topics yet.{" "}
+            <Link to="/offerers" className="text-primary hover:underline">
+              Browse everyone
+            </Link>
+            .
+          </p>
+        )}
+
+        {!matches.loading &&
+          ranked.slice(0, 5).map((r) => (
+            <Link
+              key={`${r.offerer.id}-${r.offerer.email}`}
+              to={`/member/${r.offerer.id}`}
+              className="flex min-h-11 items-center gap-3 rounded-lg border bg-card px-3 py-2.5 transition-colors hover:border-primary/50 hover:bg-accent/40"
+            >
+              <MatchRing score={r.score} size={40} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold leading-tight">
+                  {r.offerer.name || "(no name)"}
+                </p>
+                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                  {[
+                    ...r.topics.filter((t) => r.sharedTopicIds.includes(t.topicId)).map((t) => t.topicName),
+                    ...r.areas.filter((a) => r.sharedCategoryIds.includes(a.categoryId)).map((a) => a.categoryName),
+                  ].join(", ") || "—"}
+                </p>
+                {(r.offerer.city || r.offerer.country) && (
+                  <p className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <MapPin className="size-3" />
+                    {[r.offerer.city, r.offerer.country].filter(Boolean).join(", ")}
+                  </p>
+                )}
+              </div>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+            </Link>
+          ))}
+      </div>
     </Wrap>
   );
 }
 
 /* ---------------- Offerer ---------------- */
 
+const topicsOf = (detailText) => parseSeekDetail(detailText).topics;
+
+/**
+ * The offerer's dashboard shows the open requests they are matched to — the
+ * same topic-level rule as Seeker Requests (`lib/seek-matching.js`) — as just
+ * name, category and topic. Email is left off on purpose.
+ *
+ * Accept / Decline is not here yet: there is no offerer-response SP to save it
+ * or notify the seeker (PENDING-BACKEND.md §2).
+ */
 function OffererDashboard() {
   const { user } = useAuth();
-  const { counts, loading, error, reload } = useCounts();
+  const { regNo } = useMyRegNo(user);
+  const requests = useOffererRequests({ offererId: regNo, offererName: user?.name });
   const seekers = useUsers({ type: USER_TYPE.SEEKER });
+
+  const nameById = useMemo(() => {
+    const map = new Map();
+    for (const u of seekers.data) map.set(u.id, u.name);
+    return map;
+  }, [seekers.data]);
+
+  const categoryName = (id) =>
+    requests.categories.find((c) => c.categoryId === id)?.categoryName || `Category ${id}`;
+
+  const rows = useMemo(
+    () => [...requests.data].sort((a, b) => b.id - a.id).slice(0, 8),
+    [requests.data],
+  );
+
+  const loading = requests.loading || seekers.loading;
+  const error = requests.error || seekers.error;
+  const reloadRequests = requests.reload;
+  const reloadSeekers = seekers.reload;
+  const reload = useCallback(() => {
+    reloadRequests();
+    reloadSeekers();
+  }, [reloadRequests, reloadSeekers]);
 
   return (
     <Wrap>
       <Heading
         title={`Hi ${String(user.name).split(" ")[0]}`}
-        subtitle="Who is looking for help, and what you can offer."
+        subtitle="Seekers who need help with what you offer."
         action={
           <Button size="sm" variant="outline" className="h-9 shrink-0" asChild>
             <Link to="/profile">Profile</Link>
@@ -216,23 +369,79 @@ function OffererDashboard() {
         }
       />
 
-      <ErrorNote error={error} onRetry={reload} />
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold md:text-base">Seekers looking for help</h2>
+          <div className="flex items-center gap-1">
+            {requests.data.length > rows.length && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
+                <Link to="/requests">View all ({requests.data.length})</Link>
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              onClick={reload}
+              disabled={loading}
+              aria-label="Refresh"
+            >
+              <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+            </Button>
+          </div>
+        </div>
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
-        <Stat label="Seekers" value={counts?.seekers ?? 0} icon={Users} loading={loading} />
-        <Stat label="Categories" value={counts?.categories ?? 0} icon={Layers} loading={loading} />
-        <Stat label="Topics" value={counts?.topics ?? 0} icon={Tag} loading={loading} />
-        <Stat label="Services" value={counts?.services ?? 0} icon={Briefcase} loading={loading} />
+        <ErrorNote error={error} onRetry={reload} />
+
+        {loading &&
+          !error &&
+          Array.from({ length: 3 }, (_, i) => (
+            <div key={i} className="rounded-lg border bg-card px-3 py-2.5">
+              <div className="shimmer h-3.5 w-2/5 rounded" />
+              <div className="shimmer mt-1.5 h-3 w-3/5 rounded" />
+            </div>
+          ))}
+
+        {!loading && !error && hasId(regNo) && requests.categoryIds.length === 0 && requests.data.length === 0 && (
+          <p className="rounded-lg border p-4 text-center text-xs text-muted-foreground">
+            You don't serve any categories yet. Add your areas on your{" "}
+            <Link to="/profile" className="text-primary hover:underline">
+              profile
+            </Link>{" "}
+            and matching seekers will show up here.
+          </p>
+        )}
+
+        {!loading && !error && (requests.categoryIds.length > 0 || requests.data.length > 0) && rows.length === 0 && (
+          <p className="rounded-lg border p-4 text-center text-xs text-muted-foreground">
+            No seekers need help in your categories right now.
+          </p>
+        )}
+
+        {!loading &&
+          !error &&
+          rows.map((s) => {
+            const topics = topicsOf(requests.details.get(s.id));
+            return (
+              <Link
+                key={s.id}
+                to={`/member/${s.seekerId}`}
+                className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2.5 transition-colors hover:border-primary/50 hover:bg-accent/40"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold leading-tight">
+                    {nameById.get(s.seekerId) || `Seeker ${s.seekerId}`}
+                  </p>
+                  <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">
+                    {categoryName(s.categoryId)}
+                    {topics && ` · ${topics}`}
+                  </p>
+                </div>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              </Link>
+            );
+          })}
       </div>
-
-      <PeopleList
-        title="Seekers looking for help"
-        users={seekers.data.slice(0, 8)}
-        loading={seekers.loading}
-        error={seekers.error}
-        reload={seekers.reload}
-        emptyText="No seekers have registered yet."
-      />
     </Wrap>
   );
 }
@@ -264,34 +473,46 @@ function AdminDashboard() {
           value={counts?.categories ?? 0}
           icon={Layers}
           loading={loading}
-          to="/admin"
+          to="/admin?tab=categories"
         />
         <Stat
           label="Topics"
           value={counts?.topics ?? 0}
           icon={Tag}
           loading={loading}
-          to="/admin"
+          to="/admin?tab=topics"
         />
         <Stat
           label="Services"
           value={counts?.services ?? 0}
           icon={Briefcase}
           loading={loading}
-          to="/admin"
+          to="/admin?tab=services"
         />
         <Stat
           label="Members"
           value={counts?.users ?? 0}
           icon={Users}
           loading={loading}
-          to="/admin"
+          to="/admin?tab=members"
         />
       </div>
 
       <div className="grid grid-cols-2 gap-2 md:gap-3">
-        <Stat label="Seekers" value={counts?.seekers ?? 0} icon={SearchIcon} loading={loading} />
-        <Stat label="Offerers" value={counts?.offerers ?? 0} icon={Sparkles} loading={loading} />
+        <Stat
+          label="Seekers"
+          value={counts?.seekers ?? 0}
+          icon={SearchIcon}
+          loading={loading}
+          to={`/admin?tab=members&type=${USER_TYPE.SEEKER}`}
+        />
+        <Stat
+          label="Offerers"
+          value={counts?.offerers ?? 0}
+          icon={Sparkles}
+          loading={loading}
+          to={`/admin?tab=members&type=${USER_TYPE.OFFERER}`}
+        />
       </div>
     </Wrap>
   );

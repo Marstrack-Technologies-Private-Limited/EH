@@ -144,6 +144,12 @@ export function useAuth() {
           personalInformation: data.role === "offerer" ? data.bio : data.problem,
           dob: data.dob || "",
           active: true,
+          displayName: data.displayName || "",
+          photo: data.photo || "",
+          privacyLevel: data.privacyLevel || "",
+          // Never self-declared: only a verification SP may set these.
+          emailVerified: false,
+          phoneVerified: false,
         });
       } catch (err) {
         return { ok: false, error: err.message || "Could not create the account." };

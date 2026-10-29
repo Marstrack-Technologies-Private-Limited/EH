@@ -45,6 +45,9 @@ export const VIEWS = {
   SEEK_DETAILS: 1820, // VIEW SEEK ASSISTANCE DETAILS
   SEEK_DOCUMENTS: 1824, // MTVWSEEKASSISTANCEDOCUMENTS
   SEEK_IMAGES: 1825, // MTVWSEEKASSISTANCEIMAGES
+  OFFERER_RESPONSES: 1903, // RESPONSES DONE BY OFFERER TO SEEKERS REQUESTS
+  NEW_RESPONSE_ID: 1904, // NEW RESPONSE ID — {"NEWREPONSEID":n} (sic), read positionally
+  RATINGS: 1906, // VIEW RATINGS — filter by OT_TO_OFFERER_ID / OT_FROM_SEEKER_ID
 };
 
 /**
@@ -74,7 +77,22 @@ export const SPS = {
   SAVE_SEEK_IMAGE: 1827, // MT_INSERT_SEEKER_IMAGE_ATTACHMENT
   DELETE_SEEK_DOCUMENT: 1828, // MT_DELETE_SEEKER_DOCUMENT_ATTACHMENT — see below
   DELETE_SEEK_IMAGE: 1829, // MT_DELETE_SEEKER_IMAGE_ATTACHMENT — see below
+  SAVE_OFFERER_RESPONSE: 1905, // SAVE RESPONSE TO SEEKER BY OFFERER — emails from SQL
+  SAVE_RATING: 1907, // seeker rates offerer after the work is complete
 };
+
+/**
+ * 1905 and 1907 are the first SPs in this module that 501 when SUCCESS_STATUS /
+ * ERROR_STATUS are sent. Verified 2026-10-30: the bare declared set → 201;
+ * adding either status key → 501. Send exactly the declared parameters.
+ */
+
+/** @OT_RESPONSE_ACCEPT_REJECT_TO_OFFER — VARCHAR(100), stored verbatim. */
+export const RESPONSE_DECISION = { ACCEPT: "ACCEPT", REJECT: "REJECT" };
+
+/** @OT_RATING_STAR — 1 to 5 stars. */
+export const RATING_MIN = 1;
+export const RATING_MAX = 5;
 
 /**
  * Neither attachment delete is usable yet, so nothing calls them:
@@ -119,6 +137,34 @@ export const USER_TYPE = {
   OFFERER: "OFFERER",
   ALL: "ALL",
 };
+
+/**
+ * OM_USER_PRIVACY_LEVEL — the sign-up option the member picked (client sheet,
+ * row 2; EH agreed A and B for the MVP). C needs phone + ID checks, so it is
+ * listed but not selectable yet.
+ */
+export const PRIVACY_LEVEL = { A: "A", B: "B", C: "C" };
+
+export const PRIVACY_OPTIONS = [
+  {
+    value: PRIVACY_LEVEL.A,
+    title: "Maximum privacy",
+    desc: "Display name only — no real name, no photo. Email verification only.",
+    available: true,
+  },
+  {
+    value: PRIVACY_LEVEL.B,
+    title: "Balanced",
+    desc: "Display name, optional photo, general location and your experience.",
+    available: true,
+  },
+  {
+    value: PRIVACY_LEVEL.C,
+    title: "High verification",
+    desc: "Real name, photo, phone and ID checks. Coming later.",
+    available: false,
+  },
+];
 
 /** The three sign-in modes offered on the login screen. */
 export const LOGIN_MODE = {

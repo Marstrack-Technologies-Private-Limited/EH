@@ -12,10 +12,13 @@ import {
   listSeekDetails,
   listSeekAttachments,
   listSeeksForCategories,
+  listOffererResponses,
+  listRatings,
 } from "@/api/p2p.js";
 import { getView } from "@/api/http.js";
 import { USER_TYPE, VIEWS } from "@/api/config.js";
 import { hasId } from "@/lib/utils.js";
+import { matchSeekToOfferer, offererScope, parseSeekDetail } from "@/lib/seek-matching.js";
 
 /**
  * Generic loader for one of the view-backed lists.
@@ -310,51 +313,102 @@ export function useSeekDetailIndex({ enabled = true } = {}) {
 }
 
 /**
- * The seeker requests one offerer is entitled to answer.
+ * The seeker requests one offerer is entitled to answer — only what they offer.
  *
- * Two steps, because the entitlement is the offerer's own areas of interest:
- * read their categories from view 1703, then read the open seeks raised against
- * those categories from view 1818.
+ * Their scope comes from their own interests: areas (view 1703) and topics
+ * (view 1704). Seeks are read from 1818 for those categories, plus any seek
+ * addressed to them by name, then every seek is checked against its topic line
+ * (view 1820) by `matchSeekToOfferer` — see `lib/seek-matching.js` for the rule.
  *
- * `categoriesLoading` is reported separately so the page can tell "still
- * working it out" apart from "you serve no categories, so there is nothing to
- * show" — those need very different empty states.
+ * Each returned seek carries `match` ({ reason, sharedTopics }) so the screen
+ * can say why it is shown. `categoriesLoading` is separate so "still working it
+ * out" and "you serve nothing" get different empty states.
  */
-export function useOffererRequests({ offererId, includeClosed = false, enabled = true } = {}) {
+export function useOffererRequests({ offererId, offererName = "", includeClosed = false, enabled = true } = {}) {
   const authed = useSelector(selectIsApiAuthenticated);
-  const areas = useUserCategories({ userId: offererId, enabled: enabled && authed });
+  const on = enabled && authed;
+  const areas = useUserCategories({ userId: offererId, enabled: on });
+  const topics = useUserTopics({ userId: offererId, enabled: on });
+  const details = useSeekDetailIndex({ enabled: on && hasId(offererId) });
 
-  const categoryIds = useMemo(
-    () => [...new Set(areas.data.map((a) => a.categoryId).filter(Boolean))],
-    [areas.data],
+  const name = offererName || areas.data[0]?.userName || topics.data[0]?.userName || "";
+  const scope = useMemo(
+    () => offererScope({ id: offererId, name, areas: areas.data, topics: topics.data }),
+    [offererId, name, areas.data, topics.data],
   );
 
-  // Key on the joined ids, not the array identity, so a reload that returns the
-  // same categories does not refetch the seeks.
-  const idsKey = categoryIds.join(",");
+  const directIds = useMemo(() => {
+    const ids = [];
+    for (const [seekId, text] of details.index) {
+      if (parseSeekDetail(text).to && matchSeekToOfferer({}, text, scope).visible) ids.push(seekId);
+    }
+    return ids;
+  }, [details.index, scope]);
+
+  // Key on joined ids, not array identity, so a reload that returns the same
+  // scope does not refetch the seeks.
+  const idsKey = scope.categoryIds.join(",");
+  const directKey = directIds.join(",");
   const fetcher = useCallback(
-    () => listSeeksForCategories({ categoryIds: idsKey ? idsKey.split(",") : [], includeClosed }),
-    [idsKey, includeClosed],
+    () =>
+      listSeeksForCategories({
+        categoryIds: idsKey ? idsKey.split(",") : [],
+        seekIds: directKey ? directKey.split(",") : [],
+        includeClosed,
+      }),
+    [idsKey, directKey, includeClosed],
   );
 
+  const scopeReady = !areas.loading && !topics.loading && !details.loading;
   const seeks = useResource(fetcher, {
-    enabled: enabled && authed && hasId(offererId) && categoryIds.length > 0,
+    enabled:
+      on && hasId(offererId) && scopeReady && (scope.categoryIds.length > 0 || directIds.length > 0),
   });
 
+  const data = useMemo(
+    () =>
+      seeks.data.flatMap((s) => {
+        const match = matchSeekToOfferer(s, details.index.get(s.id), scope);
+        return match.visible ? [{ ...s, match }] : [];
+      }),
+    [seeks.data, details.index, scope],
+  );
+
+  // Category names for every category in scope — areas carry them, and topics
+  // do for categories picked only through a topic.
+  const categories = useMemo(() => {
+    const byId = new Map();
+    for (const a of areas.data) byId.set(a.categoryId, a);
+    for (const t of topics.data) {
+      if (!byId.has(t.categoryId)) {
+        byId.set(t.categoryId, { categoryId: t.categoryId, categoryName: t.categoryName });
+      }
+    }
+    return [...byId.values()].filter((c) => scope.categoryIds.includes(c.categoryId));
+  }, [areas.data, topics.data, scope.categoryIds]);
+
   const reloadAreas = areas.reload;
+  const reloadTopics = topics.reload;
+  const reloadDetails = details.reload;
   const reloadSeeks = seeks.reload;
   const reload = useCallback(() => {
     reloadAreas();
+    reloadTopics();
+    reloadDetails();
     reloadSeeks();
-  }, [reloadAreas, reloadSeeks]);
+  }, [reloadAreas, reloadTopics, reloadDetails, reloadSeeks]);
 
   return {
-    data: seeks.data,
-    categories: areas.data,
-    categoryIds,
-    categoriesLoading: areas.loading,
-    loading: areas.loading || (categoryIds.length > 0 && seeks.loading),
-    error: areas.error || seeks.error,
+    data,
+    categories,
+    categoryIds: scope.categoryIds,
+    scope,
+    details: details.index,
+    categoriesLoading: areas.loading || topics.loading,
+    loading:
+      !scopeReady ||
+      ((scope.categoryIds.length > 0 || directIds.length > 0) && seeks.loading),
+    error: areas.error || topics.error || details.error || seeks.error,
     reload,
   };
 }
@@ -476,4 +530,39 @@ export function useInterestIndex({ enabled = true } = {}) {
     error: areas.error || topics.error,
     reload,
   };
+}
+
+/**
+ * View 1903 — offerer responses, indexed by seek id (newest first).
+ *
+ * Pass `offererId` to read only one offerer's responses (their inbox); omit it
+ * to read every response (a seeker's view of who answered their seeks).
+ */
+export function useOffererResponseIndex({ offererId, enabled = true } = {}) {
+  const authed = useSelector(selectIsApiAuthenticated);
+  const fetcher = useCallback(() => listOffererResponses({ offererId }), [offererId]);
+  const res = useResource(fetcher, { enabled: enabled && authed });
+
+  const index = useMemo(() => {
+    const map = new Map();
+    for (const r of res.data) {
+      if (!map.has(r.seekId)) map.set(r.seekId, []);
+      map.get(r.seekId).push(r);
+    }
+    return map;
+  }, [res.data]);
+
+  return { ...res, index };
+}
+
+/** View 1906 — ratings, narrowed server-side to one offerer and/or seeker. */
+export function useRatings({ offererId, seekerId, enabled = true } = {}) {
+  const authed = useSelector(selectIsApiAuthenticated);
+  const fetcher = useCallback(
+    () => listRatings({ offererId, seekerId }),
+    [offererId, seekerId],
+  );
+  return useResource(fetcher, {
+    enabled: enabled && authed && (hasId(offererId) || hasId(seekerId)),
+  });
 }

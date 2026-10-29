@@ -1,5 +1,16 @@
 import { callSp, getView, getViewAll } from "./http.js";
-import { CREATE, DELETE, EXISTING, NEW, SPS, USER_TYPE, VIEWS } from "./config.js";
+import {
+  CREATE,
+  DELETE,
+  EXISTING,
+  NEW,
+  RATING_MAX,
+  RATING_MIN,
+  RESPONSE_DECISION,
+  SPS,
+  USER_TYPE,
+  VIEWS,
+} from "./config.js";
 import { hasId } from "@/lib/utils.js";
 
 /* ------------------------------------------------------------------ helpers */
@@ -260,9 +271,20 @@ export function normalizeUser(row) {
     registeredAt: fromSql(row.OM_USER_REGISTRATION_DATE),
     expiresAt: fromSql(row.OM_USER_EXPIRY_DATE),
     active: row.OM_USER_ACTIVE !== false,
+    // Added 2026-10-30; saved by SP 1701 (OM_-prefixed parameters).
+    displayName: str(row.OM_USER_DISPLAY_NAME),
+    photo: str(row.OM_USER_PHOTO),
+    // `avatar` is what UserAvatar reads — a stored photo shows up everywhere.
+    avatar: str(row.OM_USER_PHOTO) || undefined,
+    privacyLevel: str(row.OM_USER_PRIVACY_LEVEL),
+    emailVerified: isTrue(row.OM_USER_EMAIL_VERIFIED),
+    phoneVerified: isTrue(row.OM_USER_PHONE_VERIFIED),
     raw: row,
   };
 }
+
+/** BIT columns arrive as true/false, but tolerate 1/"1" in case the type changes. */
+const isTrue = (v) => v === true || v === 1 || v === "1";
 
 /** View 1699 — MTVWUSERMASTER, optionally narrowed to one user type. */
 export async function listUsers({ type, page, pagesize, filters, ...opts } = {}) {
@@ -454,7 +476,17 @@ export const listOfferers = (opts) => listUsers({ ...opts, type: USER_TYPE.OFFER
  * behaves like the other three and wants the "NEW" / "EXISTING" strings.
  * Verified live: sending 1 or 0 returns 201 but silently upserts reg no 0 over
  * and over; sending "NEW" inserts a fresh row and returns its new id.
+ *
+ * 2026-10-30: five profile fields were added, and these parameters are
+ * OM_-prefixed unlike the rest. The old 15-key set now 501s. Round-trip
+ * verified on reg no 13: all five store and read back on view 1699.
+ *
+ * An update overwrites every column, so a caller that does not pass one of the
+ * new fields (left `undefined`) keeps the stored value — otherwise every
+ * profile edit would wipe the photo and reset the verified flags.
  */
+const PROFILE_EXTRAS = ["displayName", "photo", "privacyLevel", "emailVerified", "phoneVerified"];
+
 export async function saveUser({
   regNo = 0,
   name,
@@ -467,7 +499,14 @@ export async function saveUser({
   registrationDate = "",
   dob = "",
   active = true,
+  ...extras
 }) {
+  let current = null;
+  if (num(regNo) > 0 && PROFILE_EXTRAS.some((k) => extras[k] === undefined)) {
+    current = await getUserByRegNo(regNo);
+  }
+  const pick = (k, fallback) => (extras[k] !== undefined ? extras[k] : (current?.[k] ?? fallback));
+
   return saveResult(
     await callSp(SPS.SAVE_USER, {
       USERREGNO: num(regNo),
@@ -482,6 +521,11 @@ export async function saveUser({
       USERREGISTRATIONDATE: sqlDate(registrationDate || new Date()),
       USERDOB: sqlDate(dob),
       USERACTIVE: bit(active),
+      OM_USER_DISPLAY_NAME: str(pick("displayName", "")).slice(0, 100),
+      OM_USER_PHOTO: str(pick("photo", "")),
+      OM_USER_PRIVACY_LEVEL: str(pick("privacyLevel", "")).slice(0, 100),
+      OM_USER_EMAIL_VERIFIED: bit(pick("emailVerified", false)),
+      OM_USER_PHONE_VERIFIED: bit(pick("phoneVerified", false)),
       NEWEXISTING: mode(regNo),
       SUCCESS_STATUS: "",
       ERROR_STATUS: "",
@@ -809,6 +853,16 @@ export function isSeekOpen(seek) {
 }
 
 /**
+ * Has the work on this seek been completed? Rating unlocks only then.
+ *
+ * Completion is the seek's closed status, so this follows `isSeekOpen` — and
+ * like it, it waits on a close SP: until one exists every seek reads open and
+ * no rating can be given. That is deliberate (client, 2026-10-30: "after
+ * completion only").
+ */
+export const isSeekComplete = (seek) => Boolean(seek) && !isSeekOpen(seek);
+
+/**
  * The seeks an offerer should see: those raised against a category they serve,
  * still open, newest first.
  *
@@ -820,25 +874,37 @@ export function isSeekOpen(seek) {
  * Up to six categories filter server-side via an OR group; beyond that the view
  * is read whole and narrowed here, because a seventh value has nowhere to go.
  */
-export async function listSeeksForCategories({ categoryIds = [], includeClosed = false, ...opts } = {}) {
+export async function listSeeksForCategories({
+  categoryIds = [],
+  seekIds = [],
+  includeClosed = false,
+  ...opts
+} = {}) {
   const ids = [...new Set(categoryIds.map(num).filter((id) => id > 0))];
-  if (!ids.length) return { data: [], totalRecords: 0 };
+  // Seeks addressed to this offerer by name — fetched by id, because the seeker
+  // may have filed them under a category the offerer does not otherwise serve.
+  const direct = [...new Set(seekIds.map(num).filter((id) => id > 0))];
+  if (!ids.length && !direct.length) return { data: [], totalRecords: 0 };
 
-  const serverSide = ids.length <= MAX_ANY_OF_VALUES;
+  const read = (column, values) =>
+    getViewAll(VIEWS.SEEKS, {
+      ...opts,
+      orderBy: "OT_SEEK_ASSISTANCE_ID",
+      sortDir: "DESC",
+      ...(values.length <= MAX_ANY_OF_VALUES ? { anyOf: { column, values } } : {}),
+    }).then(({ rows }) => rows.map(normalizeSeek));
 
-  const { rows } = await getViewAll(VIEWS.SEEKS, {
-    ...opts,
-    orderBy: "OT_SEEK_ASSISTANCE_ID",
-    sortDir: "DESC",
-    ...(serverSide
-      ? { anyOf: { column: "OT_SEEKER_CATEGORY_ID", values: ids } }
-      : {}),
-  });
+  const [byCategory, byId] = await Promise.all([
+    ids.length ? read("OT_SEEKER_CATEGORY_ID", ids) : [],
+    direct.length ? read("OT_SEEK_ASSISTANCE_ID", direct) : [],
+  ]);
 
-  const allowed = new Set(ids);
-  const data = rows
-    .map(normalizeSeek)
-    .filter((s) => allowed.has(s.categoryId))
+  const allowedCats = new Set(ids);
+  const allowedIds = new Set(direct);
+  const seen = new Set();
+  const data = [...byCategory, ...byId]
+    .filter((s) => allowedCats.has(s.categoryId) || allowedIds.has(s.id))
+    .filter((s) => !seen.has(s.id) && seen.add(s.id))
     .filter((s) => includeClosed || isSeekOpen(s));
 
   return { data, totalRecords: data.length };
@@ -876,4 +942,226 @@ export async function deleteSeekAttachment({ seekId, url, isImage = false }) {
   const removed = !data.some((a) => a.url === url);
 
   return { removed, called, error, spname };
+}
+
+/* ------------------------------------------------- offerer responses */
+
+/**
+ * View 1903 — responses offerers have sent on seeks. Fixed 2026-10-30.
+ *
+ * Column names differ from SP 1905's parameters — verified live:
+ *
+ *  - the id is OT_RESPONSE_BY_OFFERER_TRANSACTION (no `_ID`); the `_ID` form 501s
+ *  - OT_RESPONSE_DATE carries the full date AND time; OT_RESPONSE_TIME is the
+ *    clock on the 1900-01-01 epoch, so it is not used
+ *  - OT_RESPONSE_READ_STATUS exists but nothing writes it yet (null)
+ *
+ * Filters verified: OT_RESPONSE_TO_SEEKER_ASSISTANCE_ID, OT_RESPONSE_BY_OFFERER_ID,
+ * OT_RESPONSE_ACCEPT_REJECT_TO_OFFER, OT_RESPONSE_BY_OFFERER_TRANSACTION.
+ */
+export function normalizeOffererResponse(row) {
+  return {
+    id: num(row.OT_RESPONSE_BY_OFFERER_TRANSACTION),
+    seekId: num(row.OT_RESPONSE_TO_SEEKER_ASSISTANCE_ID),
+    offererId: num(row.OT_RESPONSE_BY_OFFERER_ID),
+    respondedAt: dateOrNull(row.OT_RESPONSE_DATE),
+    decision: str(row.OT_RESPONSE_ACCEPT_REJECT_TO_OFFER).trim().toUpperCase(),
+    narration: str(row.OT_RESPONSE_NARRATION),
+    readStatus: str(row.OT_RESPONSE_READ_STATUS),
+    raw: row,
+  };
+}
+
+/** View 1903, newest first, optionally narrowed server-side to a seek and/or offerer. */
+export async function listOffererResponses({ seekId, offererId, ...opts } = {}) {
+  const filters = {};
+  if (hasId(seekId)) filters.OT_RESPONSE_TO_SEEKER_ASSISTANCE_ID = seekId;
+  if (hasId(offererId)) filters.OT_RESPONSE_BY_OFFERER_ID = offererId;
+  const { rows } = await getViewAll(VIEWS.OFFERER_RESPONSES, {
+    ...opts,
+    filters,
+    orderBy: "OT_RESPONSE_BY_OFFERER_TRANSACTION",
+    sortDir: "DESC",
+  });
+  const data = rows.map(normalizeOffererResponse);
+  return { data, totalRecords: data.length };
+}
+
+/**
+ * View 1904 — the next response transaction id. Fixed 2026-10-30: returns
+ * `{"NEWREPONSEID": n}` (sic — read positionally) and advances after each 1905
+ * save (verified 1 → 2). Falls back to 0, which 1905 also accepts, so a 1904
+ * outage never blocks an offerer from answering.
+ *
+ * Read it before the write: 1905 answers `{"message":"Document Saved"}`, not
+ * the new id.
+ */
+export async function nextResponseId() {
+  try {
+    const { data } = await getView(VIEWS.NEW_RESPONSE_ID, { page: 1, pagesize: 1 });
+    return num(Object.values(data[0] || {})[0]);
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * SP 1905 — save an offerer's response to a seek. The backend emails the
+ * seeker from SQL, so this is an outward-facing write.
+ *
+ * Exact parameter set, verified 201 on 2026-10-30. **No SUCCESS_STATUS /
+ * ERROR_STATUS** — adding either one is a 501 here.
+ */
+export async function saveOffererResponse({ seekId, offererId, decision, narration }) {
+  if (!hasId(seekId) || !hasId(offererId)) {
+    throw new Error("A response needs both the ticket and the offerer.");
+  }
+  if (!Object.values(RESPONSE_DECISION).includes(decision)) {
+    throw new Error("Choose Accept or Decline.");
+  }
+  const id = await nextResponseId();
+  const res = saveResult(
+    await callSp(SPS.SAVE_OFFERER_RESPONSE, {
+      OT_RESPONSE_BY_OFFERER_TRANSACTION_ID: num(id),
+      OT_RESPONSE_TO_SEEKER_ASSISTANCE_ID: num(seekId),
+      OT_RESPONSE_BY_OFFERER_ID: num(offererId),
+      OT_RESPONSE_ACCEPT_REJECT_TO_OFFER: decision,
+      OT_RESPONSE_NARRATION: str(narration).slice(0, 1000),
+    }),
+  );
+  return { ...res, id: res.id ?? (num(id) || null) };
+}
+
+/* ------------------------------------------------------------- ratings */
+
+/**
+ * View 1906 — ratings seekers gave offerers.
+ *
+ * Columns (verified 2026-10-30, after the backend added the star and request
+ * id): OT_TO_OFFERER_ID, OT_FROM_SEEKER_ID, OT_RATING_DATE, OT_RATING_STAR,
+ * OT_RATING_COMMENTS, OT_SEEKERS_REQUEST_ID. All but the date and comments
+ * filter. Rows saved before the request id existed read `seekId: null`.
+ */
+export function normalizeRating(row) {
+  const stars = row.OT_RATING_STAR == null ? null : num(row.OT_RATING_STAR);
+  return {
+    offererId: num(row.OT_TO_OFFERER_ID),
+    seekerId: num(row.OT_FROM_SEEKER_ID),
+    seekId: row.OT_SEEKERS_REQUEST_ID == null ? null : num(row.OT_SEEKERS_REQUEST_ID),
+    ratedAt: dateOrNull(row.OT_RATING_DATE),
+    stars: stars && stars >= RATING_MIN && stars <= RATING_MAX ? stars : null,
+    comments: str(row.OT_RATING_COMMENTS),
+    raw: row,
+  };
+}
+
+export async function listRatings({ offererId, seekerId, seekId, ...opts } = {}) {
+  const filters = {};
+  if (hasId(seekId)) filters.OT_SEEKERS_REQUEST_ID = seekId;
+  if (hasId(offererId)) filters.OT_TO_OFFERER_ID = offererId;
+  if (hasId(seekerId)) filters.OT_FROM_SEEKER_ID = seekerId;
+  const { rows } = await getViewAll(VIEWS.RATINGS, { ...opts, filters });
+  const data = rows.map(normalizeRating);
+  return { data, totalRecords: data.length };
+}
+
+/** Average of the ratings that carry stars; null when none do. */
+export function averageStars(ratings) {
+  const withStars = ratings.filter((r) => r.stars != null);
+  if (!withStars.length) return null;
+  return withStars.reduce((sum, r) => sum + r.stars, 0) / withStars.length;
+}
+
+/**
+ * SP 1907 — a seeker rates an offerer for one seek. Exact 6-parameter set,
+ * verified 201 on 2026-10-30 once OT_SEEKERS_REQUEST_ID was added; the old
+ * 5-parameter set now 501s. Like 1905 it 501s if SUCCESS_STATUS / ERROR_STATUS
+ * are sent, and answers `{"message":"Document Saved"}`.
+ *
+ * "Only after completion" is enforced by the caller via `isSeekComplete`.
+ */
+export async function saveRating({
+  offererId,
+  seekerId,
+  seekId,
+  stars,
+  comments = "",
+  ratedAt = new Date(),
+}) {
+  if (!hasId(offererId) || !hasId(seekerId) || !hasId(seekId)) {
+    throw new Error("A rating needs the offerer, the seeker and the request.");
+  }
+  const n = Math.round(num(stars));
+  if (n < RATING_MIN || n > RATING_MAX) {
+    throw new Error(`Pick ${RATING_MIN} to ${RATING_MAX} stars.`);
+  }
+  return saveResult(
+    await callSp(SPS.SAVE_RATING, {
+      OT_TO_OFFERER_ID: num(offererId),
+      OT_FROM_SEEKER_ID: num(seekerId),
+      OT_RATING_DATE: sqlDateTime(ratedAt),
+      OT_RATING_STAR: n,
+      OT_RATING_COMMENTS: str(comments).slice(0, 1000),
+      OT_SEEKERS_REQUEST_ID: num(seekId),
+    }),
+  );
+}
+
+/* ----------------------------------------------------- member track record */
+
+/**
+ * Public activity numbers for a member's profile, so the other side can judge
+ * whether they are genuine (client, 2026-10-30).
+ *
+ *  - seeker:  requests raised (1818), how many an offerer accepted (1903),
+ *             ratings they have given (1906)
+ *  - offerer: requests they accepted (1903), ratings received + average (1906)
+ *
+ * Counts only — no request text or names leave this function.
+ */
+export async function getMemberActivity({ regNo, type }) {
+  if (!hasId(regNo)) return null;
+
+  if (str(type).toUpperCase() === USER_TYPE.OFFERER) {
+    const [responses, ratings] = await Promise.all([
+      listOffererResponses({ offererId: regNo }),
+      listRatings({ offererId: regNo }),
+    ]);
+    const accepted = new Set(
+      responses.data
+        .filter((r) => r.decision === RESPONSE_DECISION.ACCEPT)
+        .map((r) => r.seekId),
+    );
+    return {
+      accepted: accepted.size,
+      ratingsReceived: ratings.data.length,
+      averageStars: averageStars(ratings.data),
+    };
+  }
+
+  const [seeks, ratings] = await Promise.all([
+    listSeeks({ seekerId: regNo }),
+    listRatings({ seekerId: regNo }),
+  ]);
+  const seekIds = new Set(seeks.data.map((s) => s.id));
+  // 1903 is filtered by seek id where it fits one OR group; past that it is
+  // read whole and narrowed here.
+  const ids = [...seekIds];
+  const responses = ids.length
+    ? ids.length <= MAX_ANY_OF_VALUES
+      ? await getViewAll(VIEWS.OFFERER_RESPONSES, {
+          anyOf: { column: "OT_RESPONSE_TO_SEEKER_ASSISTANCE_ID", values: ids },
+        }).then(({ rows }) => rows.map(normalizeOffererResponse))
+      : (await listOffererResponses()).data
+    : [];
+  const accepted = new Set(
+    responses
+      .filter((r) => seekIds.has(r.seekId) && r.decision === RESPONSE_DECISION.ACCEPT)
+      .map((r) => r.seekId),
+  );
+  return {
+    raised: seekIds.size,
+    accepted: accepted.size,
+    ratingsGiven: ratings.data.length,
+  };
 }

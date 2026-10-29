@@ -102,7 +102,7 @@ async function request(path, { method = "GET", body, objectId, kind } = {}) {
       detail =
         kind === "view"
           ? ` (view ${objectId} — a filter is naming a column this view does not have)`
-          : ` (SP ${objectId} — send exactly the declared parameters, no more and no fewer, including SUCCESS_STATUS and ERROR_STATUS)`;
+          : ` (SP ${objectId} — send exactly the declared parameters, no more and no fewer; most SPs also need SUCCESS_STATUS and ERROR_STATUS, but 1905/1907 reject them)`;
     }
     throw new ApiError(
       messageFrom(parsed, `Request failed with status ${res.status}`) + detail,

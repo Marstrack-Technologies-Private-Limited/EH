@@ -180,7 +180,13 @@ Each "new id" view returns one row with a *differently named* single column
 - **1699 users**: `OM_USER_REG_NO`, `OM_USER_NAME`, `OM_USER_EMAIL`,
   `OM_USER_PASSWORD`, `OM_USER_SEEKER_GUIDANCE_ALL`, `OM_USER_COUNTRY`,
   `OM_USER_CITY`, `OM_USER_PERSONAL_INFORMATION`, `OM_USER_REGISTRATION_DATE`,
-  `OM_USER_ACTIVE`, `OM_USER_EXPIRY_DATE`
+  `OM_USER_ACTIVE`, `OM_USER_EXPIRY_DATE`, `OM_USER_DOB`; added 2026-10-30: `OM_USER_DISPLAY_NAME`,
+  `OM_USER_PHOTO`, `OM_USER_PRIVACY_LEVEL`, `OM_USER_EMAIL_VERIFIED`,
+  `OM_USER_PHONE_VERIFIED` — all filterable; saved by SP 1701 (below).
+  `OM_USER_PRIVACY_LEVEL` = the sign-up option (client sheet row 2): `A` maximum
+  privacy (display name only, no photo/DOB/location), `B` balanced, `C` high
+  verification (later). MVP offers A and B. A blank DOB stores 1900-01-01 — use
+  `toYmd` (lib/utils.js), which reads the epoch as empty.
 
 > ⚠️ **Trap:** the filter column is `OM_USER_SEEKER_GUIDANCE_ALL` — *singular*
 > "SEEKER". The spec sheet writes `OM_USER_SEEKERS_GUIDANCE_ALL` (plural), which
@@ -198,8 +204,10 @@ Each "new id" view returns one row with a *differently named* single column
 // 1698 — service
 {"SERVICEID":0,"CATEGORYID":1,"SERVICENAME":"","SERVICEDESCRIPTION":"","SERVICECREATEDBY":"","SERVICEACTIVE":1,"NEWEXISTING":"NEW","SUCCESS_STATUS":"","ERROR_STATUS":""}
 
-// 1701 — user. USERREGISTRATIONDATE was added 2026-07-28; the old 12-param set now 501s.
-{"USERREGNO":0,"USERNAME":"","USEREMAIL":"","USERPASSWORD":"","USERSEEKERGUIDANCEALL":"SEEKER","USERCOUNTRY":"","USERCITY":"","USERPERSONALINFORMATION":"","USERREGISTRATIONDATE":"2026-07-28","USERDOB":"1995-04-12","USERACTIVE":1,"NEWEXISTING":"NEW","SUCCESS_STATUS":"","ERROR_STATUS":""}
+// 1701 — user. 2026-10-30: five OM_-prefixed profile params added (note the
+// mixed naming); the old 15-key set now 501s. Round-trip verified on reg no 13.
+// An update overwrites ALL columns — saveUser carries over unpassed extras.
+{"USERREGNO":0,"USERNAME":"","USEREMAIL":"","USERPASSWORD":"","USERSEEKERGUIDANCEALL":"SEEKER","USERCOUNTRY":"","USERCITY":"","USERPERSONALINFORMATION":"","USERREGISTRATIONDATE":"2026-07-28","USERDOB":"1995-04-12","USERACTIVE":1,"OM_USER_DISPLAY_NAME":"","OM_USER_PHOTO":"","OM_USER_PRIVACY_LEVEL":"","OM_USER_EMAIL_VERIFIED":0,"OM_USER_PHONE_VERIFIED":0,"NEWEXISTING":"NEW","SUCCESS_STATUS":"","ERROR_STATUS":""}
 ```
 
 ### User interests — SPs 1702 / 1705, views 1703 / 1704
@@ -418,7 +426,21 @@ comes back on the row but 501s as a filter: select-only.
 
 Do not call 1828 or 1829 — attachments are add-only until both are fixed.
 
-### Offerer inbox — seeks filtered to the categories an offerer serves
+### Offerer inbox — only seeks that ask for what the offerer offers
+
+**Rule (client, 2026-10-27), in `src/lib/seek-matching.js` — `matchSeekToOfferer`:**
+category alone is too coarse. Offerer scope = areas (1703) + topics (1704); an
+area with no topics under it means "whole category". A seek is shown when it
+names a topic the offerer offers *in that category*, or the offerer serves the
+category whole, or it names no topics (a whole-category request), or it was sent
+to them by name. A seek sent to another offerer is never shown. Topic names are
+compared case/space-insensitively (live data has `Work Culture  Clashes` with
+two spaces). New seeks write `To: Name (#regNo)` and only their own category's
+topics per ticket; legacy `To: Name` lines match by name. Seeks addressed to an
+offerer are also fetched by id (`anyOf` on `OT_SEEK_ASSISTANCE_ID`, verified
+200), since they may sit outside the offerer's categories.
+
+The fetch below is only the first, coarse step:
 
 `useOffererRequests` (`src/hooks/use-p2p.js`) → `listSeeksForCategories`.
 
@@ -444,5 +466,33 @@ parameter** — nothing can close a seek yet, so every row reads null. `isSeekOp
 in `p2p.js` treats absent-or-negative as open; that is the one line to change
 when the values land.
 
-**There is no offerer-response object.** 1830–1845 are all 403. The compose UI on
-`/requests` is held until one is issued.
+### Offerer responses + ratings — 1903–1907 (added 2026-10-30)
+
+| Object | ID | Type | Status |
+|---|---|---|---|
+| RESPONSES DONE BY OFFERER TO SEEKERS REQUESTS | 1903 | view | ✅ fixed 2026-10-30 — see column traps below |
+| NEW RESPONSE ID | 1904 | view | ✅ fixed 2026-10-30 — `{"NEWREPONSEID":n}` (sic), read positionally; advances after each save |
+| SAVE RESPONSE TO SEEKER BY OFFERER | 1905 | sp | ✅ 201, answers `{"message":"Document Saved"}` (no id — read 1904 first). **Emails the seeker from SQL** |
+| VIEW RATINGS | 1906 | view | ✅ 200 — `OT_TO_OFFERER_ID`, `OT_FROM_SEEKER_ID`, `OT_RATING_DATE`, `OT_RATING_STAR`, `OT_RATING_COMMENTS`, `OT_SEEKERS_REQUEST_ID`; all but date/comments filter |
+| Save rating (seeker → offerer) | 1907 | sp | ✅ 201 `Document Saved` — 6 params since 2026-10-30; the old 5-param set 501s |
+
+```jsonc
+// 1905 — NO SUCCESS_STATUS / ERROR_STATUS: adding either one 501s
+{"OT_RESPONSE_BY_OFFERER_TRANSACTION_ID":0,"OT_RESPONSE_TO_SEEKER_ASSISTANCE_ID":7,"OT_RESPONSE_BY_OFFERER_ID":2,"OT_RESPONSE_ACCEPT_REJECT_TO_OFFER":"ACCEPT","OT_RESPONSE_NARRATION":"…"}
+// 1907 — same rule, no status keys. Stars 1–5. OT_SEEKERS_REQUEST_ID = the seek id.
+{"OT_TO_OFFERER_ID":2,"OT_FROM_SEEKER_ID":9,"OT_RATING_DATE":"2026-10-30 03:05:00","OT_RATING_STAR":4,"OT_RATING_COMMENTS":"…","OT_SEEKERS_REQUEST_ID":7}
+```
+
+- **1903 column traps:** id is `OT_RESPONSE_BY_OFFERER_TRANSACTION` (no `_ID` —
+  the `_ID` form 501s). `OT_RESPONSE_DATE` holds date + time; `OT_RESPONSE_TIME`
+  sits on the 1900-01-01 epoch, ignore it. `OT_RESPONSE_READ_STATUS` exists, null.
+  Filters OK: `OT_RESPONSE_TO_SEEKER_ASSISTANCE_ID`, `OT_RESPONSE_BY_OFFERER_ID`,
+  `OT_RESPONSE_ACCEPT_REJECT_TO_OFFER`, `OT_RESPONSE_BY_OFFERER_TRANSACTION`; sort
+  on the transaction column works.
+- **1905/1907 are the opposite of every earlier SP** about the status keys.
+- Decision values: `ACCEPT` / `REJECT` (`RESPONSE_DECISION` in config.js).
+- **Rating only after completion** (client, 2026-10-30) is
+  enforced in the UI by `isSeekComplete` = the seek is closed. No SP closes a seek
+  yet, so the Rate button stays locked until one exists.
+- Probe rows left on dev: two 1905 responses (seek 7, offerer 2; txn 0 and 1) and two 1907
+  ratings (offerer 2 ← seeker 9: 5★ with null request id, 4★ on request 7). No delete SP exists.
