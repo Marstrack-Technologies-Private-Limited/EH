@@ -13,6 +13,9 @@ import { getUserByRegNo } from "@/api/p2p.js";
 import { useMyRegNo } from "@/hooks/use-p2p.js";
 import { hasId } from "@/lib/utils.js";
 import { PRIVACY_OPTIONS } from "@/api/config.js";
+import { MemberActivity } from "@/components/member-activity.jsx";
+import { AcceptedWork } from "@/components/accepted-work.jsx";
+import { MemberReviews } from "@/components/member-reviews.jsx";
 import PageContainer from "@/components/layout/page-container.jsx";
 
 export default function Profile() {
@@ -129,6 +132,9 @@ export default function Profile() {
                       {new Date(record.registeredAt).toLocaleDateString()}
                     </p>
                   )}
+                  {record && (
+                    <MemberActivity regNo={record.id} type={record.type} className="mt-4" />
+                  )}
                 </>
               )}
             </CardContent>
@@ -180,6 +186,10 @@ export default function Profile() {
           </Card>
 
           {/* Backed by views 1703/1704 and SPs 1702/1705 — the real record. */}
+          {isOfferer && hasId(regNo) && <AcceptedWork offererId={regNo} />}
+
+          {record && <MemberReviews regNo={record.id} type={record.type} own />}
+
           <InterestsManager userId={regNo} />
         </div>
       </div>

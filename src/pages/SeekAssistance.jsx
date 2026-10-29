@@ -19,6 +19,8 @@ import {
   Trash2,
   Star,
   CheckCircle2,
+  Check,
+  Inbox,
   Plus,
 } from "lucide-react";
 import {
@@ -57,9 +59,10 @@ import {
 } from "@/hooks/use-p2p.js";
 import {
   deleteSeekAttachment,
+  answerOffer,
   getUserByRegNo,
   isImageFile,
-  isSeekComplete,
+  latestPerOfferer,
   saveSeek,
   saveSeekAttachment,
   saveSeekDetail,
@@ -302,7 +305,14 @@ export default function SeekAssistance() {
 
   // Derived rather than synced through an effect, so the suggestion can change
   // as topics load without a second render pass overwriting a hand-picked value.
-  const categoryIds = categoryTouched ? pickedCategoryIds : suggestedCategoryIds;
+  // By-topics requests take their category from the services picked — there
+  // is nothing to choose (client, 2026-10-30). Editing keeps the ticket's own.
+  const categoryIds =
+    audience === AUDIENCE.TOPICS && !editing
+      ? suggestedCategoryIds
+      : categoryTouched
+        ? pickedCategoryIds
+        : suggestedCategoryIds;
 
   /**
    * The header holds one OT_SEEKER_CATEGORY_ID, and that single value decides
@@ -515,28 +525,51 @@ export default function SeekAssistance() {
     setPreferredTime("");
   }, []);
 
-  /**
-   * Offerers the seeker can rate for one seek: those who ACCEPTED it (view
-   * 1903), else — while 1903 is down — the offerer the seek was sent to.
-   */
-  const offerersToRate = useCallback(
-    (seek) => {
-      const accepted = (responses.index.get(seek.id) || [])
-        .filter((r) => r.decision === RESPONSE_DECISION.ACCEPT)
-        .map((r) => r.offererId);
-      const toId = parseProblems(seekDetails.index.get(seek.id)).toId;
-      const ids = [...new Set(accepted.length ? accepted : hasId(toId) ? [toId] : [])];
-      return ids.map(
-        (id) => offerers.data.find((o) => o.id === id) || { id, name: `Offerer #${id}` },
-      );
-    },
-    [responses.index, seekDetails.index, offerers.data],
-  );
 
-  // One rating per (request, offerer) — 1907 now carries the request id.
-  const ratedKeys = useMemo(
-    () => new Set(myRatings.data.map((r) => `${r.seekId}:${r.offererId}`)),
-    [myRatings.data],
+  // Newest rating per (request, offerer) — shown on the card and used to
+  // prefill an edit.
+  const ratingByKey = useMemo(() => {
+    const map = new Map();
+    for (const r of myRatings.data) {
+      const key = `${r.seekId}:${r.offererId}`;
+      const cur = map.get(key);
+      if (!cur || (r.ratedAt?.getTime() || 0) > (cur.ratedAt?.getTime() || 0)) map.set(key, r);
+    }
+    return map;
+  }, [myRatings.data]);
+
+  const [answering, setAnswering] = useState(null);
+  // Request whose offers popup is open.
+  const [offersFor, setOffersFor] = useState(null);
+  const reloadResponses = responses.reload;
+  const answer = useCallback(
+    async (response, decision, offererName) => {
+      const yes = decision === RESPONSE_DECISION.ACCEPT;
+      if (
+        !window.confirm(
+          yes
+            ? `Accept ${offererName}'s offer to help?`
+            : `Decline ${offererName}'s offer?`,
+        )
+      ) {
+        return;
+      }
+      setAnswering(`${response.seekId}:${response.offererId}`);
+      try {
+        await answerOffer({ response, decision });
+        toast.success(yes ? "Offer accepted" : "Offer declined", {
+          description: yes
+            ? `${offererName} can see you accepted.`
+            : `${offererName} can see you declined.`,
+        });
+        reloadResponses();
+      } catch (err) {
+        toast.error("Could not save your answer", { description: err.message });
+      } finally {
+        setAnswering(null);
+      }
+    },
+    [reloadResponses],
   );
 
   const reloadSeeks = seeks.reload;
@@ -887,37 +920,64 @@ export default function SeekAssistance() {
             </div>
           )}
 
-          {/* OT_SEEKER_CATEGORY_ID — required on the header, whatever the audience. */}
+          {/* OT_SEEKER_CATEGORY_ID — required on the header, whatever the audience.
+              By topics: derived from the services, shown as one line only. */}
+          {audience === AUDIENCE.TOPICS && !editing ? (
+            chosenTopics.length > 0 && (
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Filed under:{" "}
+                <span className="font-medium text-foreground">
+                  {categoryIds
+                    .map((id) => categories.data.find((c) => c.id === id)?.name)
+                    .filter(Boolean)
+                    .join(", ")}
+                </span>
+                {categoryIds.length > 1 &&
+                  ` (${categoryIds.length} requests are raised, one per category)`}
+              </p>
+            )
+          ) : (
           <div className="mt-3 space-y-1 border-t pt-3">
-            <p className="text-sm font-semibold">Category this falls under</p>
+            <p className="text-sm font-semibold">Category</p>
             <p className="pb-1 text-[11px] text-muted-foreground">
-              Filled in from the services you picked. Offerers who serve a category are
-              the ones who see your request.
+              Pick the category this request belongs to.
             </p>
-            {/* An inactive category can't be chosen, but one already on the
-                ticket still lists — read-only — so an edit doesn't hide it. */}
-            <CheckList
-              options={selectableCategories.map((c) => ({
-                value: c.id,
-                label: c.name,
-                hint: c.active ? undefined : "No longer an active category",
-                disabled: !c.active,
-                disabledReason: `${c.name} is no longer an active category`,
-              }))}
-              selected={new Set(categoryIds)}
-              onToggle={(id) => toggleCategory(id)}
-              searchable
-              searchPlaceholder="Search categories…"
-              listClassName="max-h-56"
-            />
-            <p className="text-[10px] text-muted-foreground">
-              {editing
-                ? "A ticket is filed under one category — picking another moves this one."
-                : categoryIds.length > 1
-                  ? `Prefilled from your areas and topics. ${categoryIds.length} selected, so ${categoryIds.length} tickets are raised — one per category — and offerers in each will see it.`
-                  : "Prefilled from your areas and topics. Offerers who serve this category are the ones who will see your request."}
-            </p>
+            {/* Compact pills (client, 2026-10-30). An inactive category already on
+                the ticket still shows, read-only, so an edit doesn't hide it. */}
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Category">
+              {selectableCategories.map((c) => {
+                const on = categoryIds.includes(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    aria-pressed={on}
+                    disabled={!c.active}
+                    title={c.active ? undefined : `${c.name} is no longer an active category`}
+                    onClick={() => toggleCategory(c.id)}
+                    className={cn(
+                      "inline-flex min-h-11 items-center gap-1 rounded-full border px-3 text-xs font-medium transition-colors md:min-h-8",
+                      on
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-background text-foreground hover:border-primary/50",
+                      !c.active && "cursor-not-allowed opacity-50",
+                      c.active && "cursor-pointer",
+                    )}
+                  >
+                    {on && <Check className="size-3.5" />}
+                    {c.name}
+                  </button>
+                );
+              })}
+            </div>
+            {!editing && categoryIds.length > 1 && (
+              <p className="text-[10px] text-muted-foreground">
+                {categoryIds.length} categories picked, so {categoryIds.length} requests are
+                raised, one per category.
+              </p>
+            )}
           </div>
+          )}
         </section>
 
         {/* The issue */}
@@ -1138,38 +1198,17 @@ export default function SeekAssistance() {
           ) : (
             <ul className="space-y-1.5">
               {seeks.data.map((s) => (
-                <li key={s.id} className="rounded-md border p-2.5">
+                <li key={s.id} className="rounded-lg border bg-card p-3">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="font-mono text-[11px] font-semibold">#{s.id}</span>
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="font-mono text-xs font-semibold">#{s.id}</span>
+                    <span className="text-[11px] text-muted-foreground">
                       {formatWhen(s.raisedOn, s.raisedAt)}
                     </span>
-                    {/* Set by a closing SP that doesn't exist yet, so always open. */}
-                    <span className="ml-auto text-[10px] text-muted-foreground">
+                    <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                       {s.closed || "Open"}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setViewingId(s.id)}
-                      aria-label={`View enquiry #${s.id}`}
-                      title="View full enquiry"
-                      className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
-                    >
-                      <Eye className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => startEdit(s)}
-                      aria-label={`Edit enquiry #${s.id}`}
-                      title="Edit this enquiry"
-                      className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
-                    >
-                      <Pencil className="size-3.5" />
-                    </button>
                   </div>
-                  <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
-                    {s.narration || "(no description)"}
-                  </p>
+                  <p className="mt-1.5 line-clamp-2 text-sm">{s.narration || "(no description)"}</p>
                   {(() => {
                     const d = parseProblems(seekDetails.index.get(s.id));
                     const atts = seekAttachments.index.get(s.id) || [];
@@ -1177,7 +1216,7 @@ export default function SeekAssistance() {
                     return (
                       <>
                         {(d.topics || d.to || d.raw) && (
-                          <p className="mt-1 text-[10px] text-muted-foreground">
+                          <p className="mt-1 text-[11px] text-muted-foreground">
                             {d.topics && <>Topics: {d.topics}</>}
                             {d.topics && d.to && " · "}
                             {d.to && <>Sent to: {d.to}</>}
@@ -1185,87 +1224,102 @@ export default function SeekAssistance() {
                           </p>
                         )}
                         {atts.length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-1.5">
-                            {atts.map((a, i) => (
-                              <a
-                                key={a.url}
-                                href={a.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] text-primary hover:underline"
-                              >
-                                <Paperclip className="size-2.5" />
-                                {fileLabel(a.url, i)}
-                              </a>
-                            ))}
-                          </div>
+                          <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <Paperclip className="size-3" /> {atts.length} attachment
+                            {atts.length > 1 ? "s" : ""}
+                          </p>
                         )}
                       </>
                     );
                   })()}
-                  {(s.byEmail || s.byWhatsapp || s.callOn) && (
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      Contact:{" "}
-                      {[
-                        s.byEmail && "email",
-                        s.byWhatsapp && "WhatsApp",
-                        s.callOn && `call ${s.callOn}`,
-                      ]
-                        .filter(Boolean)
-                        .join(", ")}
-                      {s.preferredWeekDay ? ` · ${s.preferredWeekDay}` : ""}
-                      {s.preferredTime ? ` at ${toTimeInput(s.preferredTime)}` : ""}
-                    </p>
-                  )}
-                  {(responses.index.get(s.id) || []).length > 0 && (
-                    <ul className="mt-1.5 space-y-1">
-                      {responses.index.get(s.id).map((r, i) => (
-                        <li key={`${r.offererId}-${i}`} className="rounded bg-muted/60 px-2 py-1 text-[10px]">
-                          <span className="font-medium">
-                            {offerers.data.find((o) => o.id === r.offererId)?.name ||
-                              `Offerer #${r.offererId}`}
-                          </span>{" "}
-                          {r.decision === RESPONSE_DECISION.ACCEPT ? "accepted" : "declined"}
-                          {r.respondedAt && (
-                            <span className="text-muted-foreground">
-                              {" "}
-                              · {formatWhen(r.respondedAt, r.respondedAt)}
-                            </span>
-                          )}
-                          {r.narration && <>: {r.narration}</>}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {/* Rating unlocks only once the work is complete (client, 2026-10-30). */}
-                  {offerersToRate(s).length > 0 && (
-                    <div className="mt-1.5 flex flex-wrap gap-1.5">
-                      {offerersToRate(s).map((o) =>
-                        ratedKeys.has(`${s.id}:${o.id}`) ? (
-                          <span
-                            key={o.id}
-                            className="flex items-center gap-1 text-[10px] text-muted-foreground"
-                          >
-                            <CheckCircle2 className="size-3" /> You rated {o.name}
-                          </span>
-                        ) : isSeekComplete(s) ? (
+
+                  {/* Actions — labelled buttons, and offers in their own popup. */}
+                  {(() => {
+                    const offers = latestPerOfferer(responses.index.get(s.id));
+                    const accepted = offers.filter((r) => r.decision === RESPONSE_DECISION.ACCEPT);
+                    const pending = offers.filter((r) => !r.decision);
+                    const nameOf = (id) =>
+                      offerers.data.find((o) => o.id === id)?.name || "an offerer";
+                    return (
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-11 md:h-8"
+                          onClick={() => setViewingId(s.id)}
+                        >
+                          <Eye className="size-3.5" /> View
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-11 md:h-8"
+                          onClick={() => startEdit(s)}
+                        >
+                          <Pencil className="size-3.5" /> Edit
+                        </Button>
+                        {accepted.length > 0 ? (
+                          <>
+                            <Button
+                              size="sm"
+                              className="h-11 bg-emerald-600 text-white hover:bg-emerald-700 md:h-8"
+                              onClick={() => setOffersFor(s.id)}
+                            >
+                              <CheckCircle2 className="size-3.5" /> Accepted:{" "}
+                              {accepted.map((r) => nameOf(r.offererId)).join(", ")}
+                            </Button>
+                            {accepted.map((r) => {
+                              const given = ratingByKey.get(`${s.id}:${r.offererId}`);
+                              const offerer = { id: r.offererId, name: nameOf(r.offererId) };
+                              return (
+                                <Button
+                                  key={r.offererId}
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-11 border-amber-400/60 md:h-8"
+                                  onClick={() => setRating({ seekId: s.id, offerer, existing: given })}
+                                >
+                                  <Star
+                                    className={cn(
+                                      "size-3.5",
+                                      given && "fill-amber-400 text-amber-400",
+                                    )}
+                                  />
+                                  {given
+                                    ? `${given.stars ?? "–"}/5 · Edit rating`
+                                    : accepted.length > 1
+                                      ? `Rate ${offerer.name}`
+                                      : "Rate the work"}
+                                </Button>
+                              );
+                            })}
+                          </>
+                        ) : pending.length > 0 ? (
                           <Button
-                            key={o.id}
+                            size="sm"
+                            className="h-11 md:h-8"
+                            onClick={() => setOffersFor(s.id)}
+                          >
+                            <Inbox className="size-3.5" /> {pending.length} new offer
+                            {pending.length > 1 ? "s" : ""}
+                          </Button>
+                        ) : offers.length > 0 ? (
+                          <Button
                             size="sm"
                             variant="outline"
                             className="h-11 md:h-8"
-                            onClick={() => setRating({ seekId: s.id, offerer: o })}
+                            onClick={() => setOffersFor(s.id)}
                           >
-                            <Star className="size-3.5" /> Rate {o.name}
+                            <Inbox className="size-3.5" /> Offers ({offers.length})
                           </Button>
                         ) : (
-                          <span key={o.id} className="text-[10px] text-muted-foreground">
-                            You can rate {o.name} once the work is complete.
+                          <span className="flex items-center px-1 text-[11px] text-muted-foreground">
+                            No offers yet
                           </span>
-                        ),
-                      )}
-                    </div>
-                  )}
+                        )}
+                      </div>
+                    );
+                  })()}
                 </li>
               ))}
             </ul>
@@ -1320,7 +1374,107 @@ export default function SeekAssistance() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={offersFor !== null} onOpenChange={(open) => !open && setOffersFor(null)}>
+        <DialogContent className="max-h-[85vh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Offers on #{offersFor}</DialogTitle>
+            <DialogDescription>Accept the offerer you want to work with.</DialogDescription>
+          </DialogHeader>
+          {(() => {
+            const seek = seeks.data.find((x) => x.id === offersFor);
+            if (!seek) return null;
+            const offers = latestPerOfferer(responses.index.get(seek.id));
+            return (
+              <ul className="space-y-2">
+                {offers.map((r) => {
+                  const name =
+                    offerers.data.find((o) => o.id === r.offererId)?.name || "An offerer";
+                  const busy = answering === `${r.seekId}:${r.offererId}`;
+                  const accepted = r.decision === RESPONSE_DECISION.ACCEPT;
+                  const declined = r.decision === RESPONSE_DECISION.REJECT;
+                  const given = ratingByKey.get(`${seek.id}:${r.offererId}`);
+                  return (
+                    <li
+                      key={r.offererId}
+                      className={cn(
+                        "rounded-lg border p-3",
+                        accepted && "border-emerald-500/40 bg-emerald-500/5",
+                      )}
+                    >
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Link
+                          to={`/member/${r.offererId}`}
+                          className="text-sm font-semibold hover:text-primary hover:underline"
+                        >
+                          {name}
+                        </Link>
+                        {r.respondedAt && (
+                          <span className="ml-auto text-[11px] text-muted-foreground">
+                            {formatWhen(r.respondedAt, r.respondedAt)}
+                          </span>
+                        )}
+                      </div>
+                      {r.narration && <p className="mt-1 text-sm">“{r.narration}”</p>}
+
+                      {accepted ? (
+                        <div className="mt-2 space-y-1.5">
+                          <p className="flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                            <CheckCircle2 className="size-3.5" /> You accepted this offer
+                          </p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-11 md:h-8"
+                            onClick={() => {
+                              setOffersFor(null);
+                              setRating({
+                                seekId: seek.id,
+                                offerer: { id: r.offererId, name },
+                                existing: given,
+                              });
+                            }}
+                          >
+                            <Star
+                              className={cn("size-3.5", given && "fill-amber-400 text-amber-400")}
+                            />
+                            {given ? `${given.stars ?? "–"}/5 · Edit rating` : `Rate ${name}`}
+                          </Button>
+                        </div>
+                      ) : declined ? (
+                        <p className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+                          <X className="size-3.5" /> You declined this offer
+                        </p>
+                      ) : (
+                        <div className="mt-2 grid grid-cols-2 gap-1.5">
+                          <Button
+                            className="h-11 bg-emerald-600 text-white hover:bg-emerald-700 md:h-9"
+                            disabled={busy}
+                            onClick={() => answer(r, RESPONSE_DECISION.ACCEPT, name)}
+                          >
+                            <Check className="size-4" /> Accept
+                          </Button>
+                          <Button
+                            variant="outline"
+                            className="h-11 md:h-9"
+                            disabled={busy}
+                            onClick={() => answer(r, RESPONSE_DECISION.REJECT, name)}
+                          >
+                            <X className="size-4" /> Decline
+                          </Button>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
       <RateOffererDialog
+        key={rating ? `${rating.seekId}:${rating.offerer.id}:${rating.existing ? "edit" : "new"}` : "closed"}
+        existing={rating?.existing}
         open={rating !== null}
         onOpenChange={(open) => !open && setRating(null)}
         offerer={rating?.offerer}

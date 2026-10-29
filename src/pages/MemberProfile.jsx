@@ -19,7 +19,9 @@ import {
   useUserTopics,
 } from "@/hooks/use-p2p.js";
 import { parseSeekDetail } from "@/lib/seek-matching.js";
-import { getMemberActivity, getUserByRegNo } from "@/api/p2p.js";
+import { getUserByRegNo } from "@/api/p2p.js";
+import { MemberActivity } from "@/components/member-activity.jsx";
+import { MemberReviews } from "@/components/member-reviews.jsx";
 import { hasId } from "@/lib/utils.js";
 import PageContainer from "@/components/layout/page-container.jsx";
 
@@ -63,18 +65,6 @@ export default function MemberProfile() {
     load();
   }, [load]);
 
-  // Track record — counts that show whether this member is genuine.
-  const [activity, setActivity] = useState(null);
-  useEffect(() => {
-    if (!member) return;
-    let cancelled = false;
-    getMemberActivity({ regNo: member.id, type: member.type })
-      .then((a) => !cancelled && setActivity(a))
-      .catch(() => !cancelled && setActivity(null));
-    return () => {
-      cancelled = true;
-    };
-  }, [member]);
 
   const topics = useUserTopics({ userId: Number.isFinite(regNo) ? regNo : null });
 
@@ -161,32 +151,7 @@ export default function MemberProfile() {
                       {new Date(member.registeredAt).toLocaleDateString()}
                     </p>
                   )}
-                  {activity && (
-                    <dl className="mt-4 grid w-full grid-cols-3 gap-1.5">
-                      {(role === "offerer"
-                        ? [
-                            ["Accepted", activity.accepted],
-                            ["Ratings", activity.ratingsReceived],
-                            [
-                              "Avg stars",
-                              activity.averageStars != null
-                                ? activity.averageStars.toFixed(1)
-                                : "—",
-                            ],
-                          ]
-                        : [
-                            ["Requests", activity.raised],
-                            ["Accepted", activity.accepted],
-                            ["Ratings given", activity.ratingsGiven],
-                          ]
-                      ).map(([label, value]) => (
-                        <div key={label} className="rounded-lg bg-muted/60 px-1 py-2">
-                          <dd className="text-base font-bold">{value}</dd>
-                          <dt className="text-[10px] text-muted-foreground">{label}</dt>
-                        </div>
-                      ))}
-                    </dl>
-                  )}
+                  <MemberActivity regNo={member.id} type={member.type} className="mt-4" />
                 </>
               )}
             </CardContent>
@@ -240,6 +205,8 @@ export default function MemberProfile() {
                 )}
               </CardContent>
             </Card>
+
+            {member && <MemberReviews regNo={member.id} type={member.type} />}
 
             {/* Offerer viewing a seeker: their requests, but ONLY those for what
                 this offerer serves (same rule as Seeker Requests). */}

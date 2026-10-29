@@ -87,8 +87,12 @@ export const SPS = {
  * adding either status key → 501. Send exactly the declared parameters.
  */
 
-/** @OT_RESPONSE_ACCEPT_REJECT_TO_OFFER — VARCHAR(100), stored verbatim. */
-export const RESPONSE_DECISION = { ACCEPT: "ACCEPT", REJECT: "REJECT" };
+/**
+ * @OT_RESPONSE_ACCEPT_REJECT_TO_OFFER — the SEEKER's answer to an offer
+ * (client, 2026-10-30). The offerer sends an offer with it empty (pending);
+ * the seeker then saves ACCEPT or REJECT on the same response.
+ */
+export const RESPONSE_DECISION = { PENDING: "", ACCEPT: "ACCEPT", REJECT: "REJECT" };
 
 /** @OT_RATING_STAR — 1 to 5 stars. */
 export const RATING_MIN = 1;

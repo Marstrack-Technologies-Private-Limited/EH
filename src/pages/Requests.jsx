@@ -45,7 +45,7 @@ import {
   useUsers,
 } from "@/hooks/use-p2p.js";
 import { parseSeekDetail } from "@/lib/seek-matching.js";
-import { saveOffererResponse } from "@/api/p2p.js";
+import { sendOffer } from "@/api/p2p.js";
 import { RESPONSE_DECISION, SPS } from "@/api/config.js";
 import PageContainer from "@/components/layout/page-container.jsx";
 import { SeekViewerDialog } from "@/components/seek-viewer.jsx";
@@ -120,7 +120,6 @@ export default function Requests() {
   const [openId, setOpenId] = useState(null);
   const [viewingId, setViewingId] = useState(null);
   const [replies, setReplies] = useState({});
-  const [decisions, setDecisions] = useState({});
   const [sendingId, setSendingId] = useState(null);
   const responses = useOffererResponseIndex({ offererId: regNo, enabled: hasId(regNo) });
 
@@ -154,6 +153,7 @@ export default function Requests() {
       if (statusFilter !== "all") {
         const mine = myResponse(s.id);
         if (statusFilter === "new" && mine) return false;
+        if (statusFilter === "waiting" && (!mine || mine.decision)) return false;
         if (statusFilter === "accepted" && mine?.decision !== RESPONSE_DECISION.ACCEPT) return false;
         if (statusFilter === "declined" && mine?.decision !== RESPONSE_DECISION.REJECT) return false;
       }
@@ -197,22 +197,14 @@ export default function Requests() {
   const sendResponse = useCallback(
     async (seek) => {
       const text = (replies[seek.id] || "").trim();
-      const decision = decisions[seek.id];
-      const missing = [!decision && "Accept or Decline", !text && "a message"].filter(Boolean);
-      if (missing.length) {
-        toast.error("Response incomplete", { description: `Add ${missing.join(" and ")}.` });
+      if (!text) {
+        toast.error("Offer incomplete", { description: "Write a message with your offer." });
         return;
       }
-
-      const verb = decision === RESPONSE_DECISION.ACCEPT ? "ACCEPT" : "DECLINE";
       if (
         !window.confirm(
-          `${verb} ticket #${seek.id}?
-
-"${text.slice(0, 200)}${text.length > 200 ? "…" : ""}"
-
-` +
-            "The seeker will be emailed your response.",
+          `Send your offer to help with this request?\n\n"${text.slice(0, 200)}${text.length > 200 ? "…" : ""}"\n\n` +
+            "The seeker is emailed and can accept or decline it.",
         )
       ) {
         return;
@@ -220,27 +212,22 @@ export default function Requests() {
 
       setSendingId(seek.id);
       try {
-        await saveOffererResponse({
-          seekId: seek.id,
-          offererId: regNo,
-          decision,
-          narration: text,
-        });
+        await sendOffer({ seekId: seek.id, offererId: regNo, narration: text });
         setReplies((prev) => ({ ...prev, [seek.id]: "" }));
         setOpenId(null);
-        toast.success(decision === RESPONSE_DECISION.ACCEPT ? "Accepted" : "Declined", {
-          description: `Response saved on ticket #${seek.id}. The seeker is emailed by the system.`,
+        toast.success("Offer sent", {
+          description: "The seeker has been emailed. You'll see here when they answer.",
         });
         reloadResponses();
       } catch (err) {
-        toast.error(`Response not saved (SP ${SPS.SAVE_OFFERER_RESPONSE})`, {
+        toast.error(`Offer not sent (SP ${SPS.SAVE_OFFERER_RESPONSE})`, {
           description: err.message,
         });
       } finally {
         setSendingId(null);
       }
     },
-    [replies, decisions, regNo, reloadResponses],
+    [replies, regNo, reloadResponses],
   );
 
   if (!hasId(regNo)) {
@@ -340,10 +327,11 @@ export default function Requests() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Any response</SelectItem>
-                <SelectItem value="new">Not answered yet</SelectItem>
-                <SelectItem value="accepted">I accepted</SelectItem>
-                <SelectItem value="declined">I declined</SelectItem>
+                <SelectItem value="all">Any status</SelectItem>
+                <SelectItem value="new">No offer sent yet</SelectItem>
+                <SelectItem value="waiting">Offer sent, waiting</SelectItem>
+                <SelectItem value="accepted">Seeker accepted</SelectItem>
+                <SelectItem value="declined">Seeker declined</SelectItem>
               </SelectContent>
             </Select>
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
@@ -482,62 +470,55 @@ export default function Requests() {
                   )}
                 </div>
 
-                {/* Answered: one clear, final status — no second response. */}
-                {myResponse(s.id) && (
-                  <div
-                    className={
-                      "mt-2 flex items-start gap-2 rounded-md px-2.5 py-2 text-[11px] " +
-                      (myResponse(s.id).decision === RESPONSE_DECISION.ACCEPT
-                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                        : "bg-muted text-muted-foreground")
-                    }
-                  >
-                    {myResponse(s.id).decision === RESPONSE_DECISION.ACCEPT ? (
-                      <Check className="mt-0.5 size-3.5 shrink-0" />
-                    ) : (
-                      <X className="mt-0.5 size-3.5 shrink-0" />
-                    )}
-                    <div className="min-w-0">
-                      <p className="font-semibold">
-                        You {myResponse(s.id).decision === RESPONSE_DECISION.ACCEPT ? "accepted" : "declined"}{" "}
-                        this request
-                        {myResponse(s.id).respondedAt &&
-                          ` on ${myResponse(s.id).respondedAt.toLocaleDateString(undefined, {
-                            day: "numeric",
-                            month: "short",
-                          })}`}
-                      </p>
-                      {myResponse(s.id).narration && (
-                        <p className="mt-0.5 line-clamp-2 opacity-90">
-                          “{myResponse(s.id).narration}”
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {/* Offer sent: one clear status — no second offer. */}
+                {myResponse(s.id) &&
+                  (() => {
+                    const r = myResponse(s.id);
+                    const accepted = r.decision === RESPONSE_DECISION.ACCEPT;
+                    const declined = r.decision === RESPONSE_DECISION.REJECT;
+                    return (
+                      <div
+                        className={
+                          "mt-2 flex items-start gap-2 rounded-md px-2.5 py-2 text-[11px] " +
+                          (accepted
+                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                            : declined
+                              ? "bg-muted text-muted-foreground"
+                              : "bg-amber-500/10 text-amber-700 dark:text-amber-400")
+                        }
+                      >
+                        {accepted ? (
+                          <Check className="mt-0.5 size-3.5 shrink-0" />
+                        ) : declined ? (
+                          <X className="mt-0.5 size-3.5 shrink-0" />
+                        ) : (
+                          <Clock className="mt-0.5 size-3.5 shrink-0" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="font-semibold">
+                            {accepted
+                              ? "The seeker accepted your offer"
+                              : declined
+                                ? "The seeker declined your offer"
+                                : "Offer sent, waiting for the seeker"}
+                            {r.respondedAt &&
+                              ` · ${r.respondedAt.toLocaleDateString(undefined, {
+                                day: "numeric",
+                                month: "short",
+                              })}`}
+                          </p>
+                          {r.narration && (
+                            <p className="mt-0.5 line-clamp-2 opacity-90">“{r.narration}”</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                 {isOpen && !myResponse(s.id) ? (
                   <div className="mt-2 space-y-1.5">
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {[
-                        [RESPONSE_DECISION.ACCEPT, "Accept", Check],
-                        [RESPONSE_DECISION.REJECT, "Decline", X],
-                      ].map(([value, label, Icon]) => (
-                        <Button
-                          key={value}
-                          type="button"
-                          size="sm"
-                          variant={decisions[s.id] === value ? "default" : "outline"}
-                          className="h-11 md:h-8"
-                          aria-pressed={decisions[s.id] === value}
-                          onClick={() => setDecisions((prev) => ({ ...prev, [s.id]: value }))}
-                        >
-                          <Icon className="size-3.5" /> {label}
-                        </Button>
-                      ))}
-                    </div>
                     <Label htmlFor={`reply-${s.id}`} className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
-                      Your response
+                      Your offer
                     </Label>
                     <Textarea
                       id={`reply-${s.id}`}
@@ -548,7 +529,7 @@ export default function Requests() {
                       onChange={(e) =>
                         setReplies((prev) => ({ ...prev, [s.id]: e.target.value }))
                       }
-                      placeholder="How can you help with this?"
+                      placeholder="How can you help? When are you free to talk?"
                     />
                     <div className="flex gap-1.5">
                       <Button
@@ -558,7 +539,7 @@ export default function Requests() {
                         onClick={() => sendResponse(s)}
                       >
                         <Send className="size-3.5" />{" "}
-                        {sendingId === s.id ? "Sending…" : "Send response"}
+                        {sendingId === s.id ? "Sending…" : "Send offer"}
                       </Button>
                       <Button
                         size="sm"
@@ -574,14 +555,14 @@ export default function Requests() {
                   // Labelled actions — a bare eye icon left offerers guessing
                   // what it opened (client, 2026-10-27).
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    {/* Once answered, the decision is final — no "respond again". */}
+                    {/* One offer per request — no "respond again". */}
                     {!myResponse(s.id) && (
                       <Button
                         size="sm"
                         className="h-11 md:h-8"
                         onClick={() => setOpenId(s.id)}
                       >
-                        <Send className="size-3.5" /> Respond
+                        <Send className="size-3.5" /> Offer to help
                       </Button>
                     )}
                     <Button
@@ -609,8 +590,8 @@ export default function Requests() {
         <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <p className="text-[11px] text-muted-foreground">
           You see a request only if it asks for a service you offer, covers a whole
-          category you serve, or was sent to you. When you respond, the seeker is
-          emailed.
+          category you serve, or was sent to you. When you send an offer, the seeker is
+          emailed and can accept or decline it.
         </p>
       </div>
 
@@ -634,10 +615,11 @@ export default function Requests() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Any response</SelectItem>
-                <SelectItem value="new">Not answered yet</SelectItem>
-                <SelectItem value="accepted">I accepted</SelectItem>
-                <SelectItem value="declined">I declined</SelectItem>
+                <SelectItem value="all">Any status</SelectItem>
+                <SelectItem value="new">No offer sent yet</SelectItem>
+                <SelectItem value="waiting">Offer sent, waiting</SelectItem>
+                <SelectItem value="accepted">Seeker accepted</SelectItem>
+                <SelectItem value="declined">Seeker declined</SelectItem>
               </SelectContent>
             </Select>
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>

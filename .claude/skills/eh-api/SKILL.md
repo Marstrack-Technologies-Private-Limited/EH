@@ -21,6 +21,10 @@ Base URL: `https://devapi.tech23.net`
    content, and a restore afterwards. Never store "test", "probe", "API", "dev"
    or "Claude" in any field. (User, 2026-10-30, after probe rows reached the
    clone app.)
+5. **Read the view before every save — update, never duplicate.** Look up the
+   current row first and reuse its id (`EXISTING` / same transaction id), so a
+   save updates the record instead of adding a second row. 1905 offers/answers
+   do this via `currentResponse`. (User, 2026-10-30.)
 4. **No object IDs in the UI.** View/SP numbers and developer notes ("see
    PENDING-BACKEND.md") never appear in app text — only inside error messages.
 

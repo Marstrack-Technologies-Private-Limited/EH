@@ -16,12 +16,22 @@ import { saveRating } from "@/api/p2p.js";
 import { RATING_MAX, SPS } from "@/api/config.js";
 
 /**
- * Seeker rates an offerer for one seek — SP 1907. Opened only for a completed
- * seek; the caller enforces that (see `isSeekComplete`).
+ * Seeker rates an offerer for one request — SP 1907. Opened from the request
+ * once the seeker has accepted that offerer. Pass `existing` to edit a rating
+ * already given; the parent remounts this (via `key`) so the form starts from it.
  */
-export function RateOffererDialog({ open, onOpenChange, offerer, seekerId, seekId, onSaved }) {
-  const [stars, setStars] = useState(0);
-  const [comments, setComments] = useState("");
+export function RateOffererDialog({
+  open,
+  onOpenChange,
+  offerer,
+  seekerId,
+  seekId,
+  existing,
+  onSaved,
+}) {
+  const [stars, setStars] = useState(existing?.stars ?? 0);
+  const [comments, setComments] = useState(existing?.comments ?? "");
+  const editing = Boolean(existing);
   const [saving, setSaving] = useState(false);
 
   const reset = () => {
@@ -46,7 +56,7 @@ export function RateOffererDialog({ open, onOpenChange, offerer, seekerId, seekI
         stars,
         comments: comments.trim(),
       });
-      toast.success("Thanks for your rating", {
+      toast.success(editing ? "Rating updated" : "Thanks for your rating", {
         description: `${stars}/${RATING_MAX} for ${offerer.name} on ticket #${seekId}.`,
       });
       reset();
@@ -69,9 +79,11 @@ export function RateOffererDialog({ open, onOpenChange, offerer, seekerId, seekI
     >
       <DialogContent className="w-[calc(100%-2rem)] sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Rate {offerer?.name || "the offerer"}</DialogTitle>
+          <DialogTitle>
+            {editing ? "Edit your rating for" : "Rate"} {offerer?.name || "the offerer"}
+          </DialogTitle>
           <DialogDescription>
-            Ticket #{seekId} is complete. Your rating helps other seekers choose.
+            How did the work on request #{seekId} go? Your rating helps other seekers choose.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -97,7 +109,7 @@ export function RateOffererDialog({ open, onOpenChange, offerer, seekerId, seekI
             Cancel
           </Button>
           <Button className="h-11 md:h-9" disabled={saving} onClick={submit}>
-            {saving ? "Saving…" : "Submit rating"}
+            {saving ? "Saving…" : editing ? "Save changes" : "Submit rating"}
           </Button>
         </DialogFooter>
       </DialogContent>

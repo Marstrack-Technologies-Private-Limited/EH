@@ -1006,30 +1006,108 @@ export async function nextResponseId() {
 }
 
 /**
- * SP 1905 — save an offerer's response to a seek. The backend emails the
- * seeker from SQL, so this is an outward-facing write.
+ * SP 1905 — one response row, written by two people (client, 2026-10-30):
  *
- * Exact parameter set, verified 201 on 2026-10-30. **No SUCCESS_STATUS /
- * ERROR_STATUS** — adding either one is a 501 here.
+ *  1. the offerer sends an offer — narration filled, decision empty (pending)
+ *  2. the seeker answers it — same transaction id, decision ACCEPT or REJECT
+ *
+ * The backend emails the seeker from SQL on save. Exact parameter set, verified
+ * 201; **no SUCCESS_STATUS / ERROR_STATUS** — adding either one is a 501.
+ *
+ * Every save re-reads view 1903 first and reuses the existing transaction id,
+ * so it updates rather than duplicates (client rule, 2026-10-30). Readers still
+ * take the newest row per (request, offerer) — see `latestPerOfferer` — in case
+ * the SP ever inserts instead of updating.
  */
-export async function saveOffererResponse({ seekId, offererId, decision, narration }) {
+function responseParams({ id, seekId, offererId, decision, narration }) {
+  return {
+    OT_RESPONSE_BY_OFFERER_TRANSACTION_ID: num(id),
+    OT_RESPONSE_TO_SEEKER_ASSISTANCE_ID: num(seekId),
+    OT_RESPONSE_BY_OFFERER_ID: num(offererId),
+    OT_RESPONSE_ACCEPT_REJECT_TO_OFFER: decision,
+    OT_RESPONSE_NARRATION: str(narration).slice(0, 1000),
+  };
+}
+
+/**
+ * The current response row for one (request, offerer), read fresh from view
+ * 1903 right before a save — so a save updates that row (same transaction id)
+ * instead of adding a duplicate (client rule, 2026-10-30).
+ */
+export async function currentResponse({ seekId, offererId }) {
+  const { data } = await listOffererResponses({ seekId, offererId });
+  return latestPerOfferer(data)[0] || null;
+}
+
+/**
+ * Offerer sends an offer on a request; the seeker decides later. If this
+ * offerer already has a row on the request, that row is updated (its decision
+ * kept) rather than a second one created.
+ */
+export async function sendOffer({ seekId, offererId, narration }) {
   if (!hasId(seekId) || !hasId(offererId)) {
-    throw new Error("A response needs both the ticket and the offerer.");
+    throw new Error("An offer needs both the request and the offerer.");
   }
-  if (!Object.values(RESPONSE_DECISION).includes(decision)) {
+  if (!str(narration).trim()) throw new Error("Write a message with your offer.");
+  const existing = await currentResponse({ seekId, offererId });
+  const id = existing ? existing.id : await nextResponseId();
+  const res = saveResult(
+    await callSp(
+      SPS.SAVE_OFFERER_RESPONSE,
+      responseParams({
+        id,
+        seekId,
+        offererId,
+        decision: existing?.decision ?? RESPONSE_DECISION.PENDING,
+        narration,
+      }),
+    ),
+  );
+  return { ...res, id: res.id ?? (num(id) || null), updated: Boolean(existing) };
+}
+
+/**
+ * Seeker accepts or declines an offer. The row is re-read first, so the save
+ * updates the current transaction — never a new row — and an answer that was
+ * already given is not sent twice.
+ */
+export async function answerOffer({ response, decision }) {
+  if (![RESPONSE_DECISION.ACCEPT, RESPONSE_DECISION.REJECT].includes(decision)) {
     throw new Error("Choose Accept or Decline.");
   }
-  const id = await nextResponseId();
-  const res = saveResult(
-    await callSp(SPS.SAVE_OFFERER_RESPONSE, {
-      OT_RESPONSE_BY_OFFERER_TRANSACTION_ID: num(id),
-      OT_RESPONSE_TO_SEEKER_ASSISTANCE_ID: num(seekId),
-      OT_RESPONSE_BY_OFFERER_ID: num(offererId),
-      OT_RESPONSE_ACCEPT_REJECT_TO_OFFER: decision,
-      OT_RESPONSE_NARRATION: str(narration).slice(0, 1000),
-    }),
+  const current = await currentResponse({
+    seekId: response.seekId,
+    offererId: response.offererId,
+  });
+  if (!current) throw new Error("This offer could not be found. Refresh and try again.");
+  if (current.decision === decision) return { ok: true, id: current.id, unchanged: true };
+  return saveResult(
+    await callSp(
+      SPS.SAVE_OFFERER_RESPONSE,
+      responseParams({
+        id: current.id,
+        seekId: current.seekId,
+        offererId: current.offererId,
+        decision,
+        narration: current.narration,
+      }),
+    ),
   );
-  return { ...res, id: res.id ?? (num(id) || null) };
+}
+
+/**
+ * Newest response per offerer within one request's list (which arrives newest
+ * first). A seeker's answer may land as a fresh row; the newest one is the
+ * current state, and the offer text is taken from the newest row that has one.
+ */
+export function latestPerOfferer(list = []) {
+  const byOfferer = new Map();
+  for (const r of list) {
+    const cur = byOfferer.get(r.offererId);
+    if (!cur) byOfferer.set(r.offererId, { ...r });
+    else if (!cur.narration && r.narration) cur.narration = r.narration;
+  }
+  return [...byOfferer.values()];
 }
 
 /* ------------------------------------------------------------- ratings */
@@ -1061,7 +1139,15 @@ export async function listRatings({ offererId, seekerId, seekId, ...opts } = {})
   if (hasId(offererId)) filters.OT_TO_OFFERER_ID = offererId;
   if (hasId(seekerId)) filters.OT_FROM_SEEKER_ID = seekerId;
   const { rows } = await getViewAll(VIEWS.RATINGS, { ...opts, filters });
-  const data = rows.map(normalizeRating);
+  // SP 1907 has no rating id, so an edited rating may arrive as a second row.
+  // Keep only the newest per (seeker, offerer, request) so it never counts twice.
+  const newest = new Map();
+  for (const r of rows.map(normalizeRating)) {
+    const key = `${r.seekerId}:${r.offererId}:${r.seekId ?? "none"}`;
+    const cur = newest.get(key);
+    if (!cur || (r.ratedAt?.getTime() || 0) >= (cur.ratedAt?.getTime() || 0)) newest.set(key, r);
+  }
+  const data = [...newest.values()];
   return { data, totalRecords: data.length };
 }
 
@@ -1127,8 +1213,14 @@ export async function getMemberActivity({ regNo, type }) {
       listOffererResponses({ offererId: regNo }),
       listRatings({ offererId: regNo }),
     ]);
+    const bySeek = new Map();
+    for (const r of responses.data) {
+      if (!bySeek.has(r.seekId)) bySeek.set(r.seekId, []);
+      bySeek.get(r.seekId).push(r);
+    }
     const accepted = new Set(
-      responses.data
+      [...bySeek.values()]
+        .flatMap((list) => latestPerOfferer(list))
         .filter((r) => r.decision === RESPONSE_DECISION.ACCEPT)
         .map((r) => r.seekId),
     );
@@ -1154,9 +1246,16 @@ export async function getMemberActivity({ regNo, type }) {
         }).then(({ rows }) => rows.map(normalizeOffererResponse))
       : (await listOffererResponses()).data
     : [];
+  const bySeek = new Map();
+  for (const r of responses) {
+    if (!seekIds.has(r.seekId)) continue;
+    if (!bySeek.has(r.seekId)) bySeek.set(r.seekId, []);
+    bySeek.get(r.seekId).push(r);
+  }
   const accepted = new Set(
-    responses
-      .filter((r) => seekIds.has(r.seekId) && r.decision === RESPONSE_DECISION.ACCEPT)
+    [...bySeek.values()]
+      .flatMap((list) => latestPerOfferer(list))
+      .filter((r) => r.decision === RESPONSE_DECISION.ACCEPT)
       .map((r) => r.seekId),
   );
   return {

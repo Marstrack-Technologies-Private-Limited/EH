@@ -3,6 +3,7 @@ import { LogOut, Handshake } from "lucide-react";
 import { cn } from "@/lib/utils.js";
 import { useAuth } from "@/hooks/use-auth.js";
 import { navForRole } from "./nav-config.js";
+import { badgeLabel, useNavBadges } from "@/hooks/use-nav-badges.js";
 import { UserAvatar } from "@/components/user-avatar.jsx";
 
 export default function SidebarNav() {
@@ -10,6 +11,7 @@ export default function SidebarNav() {
   const location = useLocation();
   const navigate = useNavigate();
   const items = navForRole(user?.role);
+  const badges = useNavBadges(user);
 
   const handleLogout = () => {
     logout();
@@ -52,6 +54,14 @@ export default function SidebarNav() {
             >
               <item.icon className="size-4.5 shrink-0" />
               <span>{item.label}</span>
+              {badges[item.to] ? (
+                <span
+                  className="ml-auto min-w-5 rounded-full bg-destructive px-1.5 text-center text-[10px] font-bold leading-5 text-white"
+                  aria-label={`${badges[item.to]} new`}
+                >
+                  {badgeLabel(badges[item.to])}
+                </span>
+              ) : null}
             </NavLink>
           );
         })}

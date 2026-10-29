@@ -15,6 +15,7 @@ import {
   LifeBuoy,
 } from "lucide-react";
 import { MatchRing } from "@/components/match-ring.jsx";
+import { MemberActivity } from "@/components/member-activity.jsx";
 import { useOffererMatches } from "@/hooks/use-offerer-matches.js";
 import { isSeekOpen } from "@/api/p2p.js";
 import { Button } from "@/components/ui/button.jsx";
@@ -231,6 +232,13 @@ function SeekerDashboard() {
         />
       </div>
 
+      <section>
+        <p className="mb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+          Your track record
+        </p>
+        <MemberActivity regNo={matches.regNo} type="SEEKER" />
+      </section>
+
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold md:text-base">Your top matches</h2>
@@ -368,6 +376,13 @@ function OffererDashboard() {
           </Button>
         }
       />
+
+      <section>
+        <p className="mb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+          Your track record
+        </p>
+        <MemberActivity regNo={regNo} type="OFFERER" />
+      </section>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
